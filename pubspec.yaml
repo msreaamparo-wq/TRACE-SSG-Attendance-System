@@ -1,0 +1,92 @@
+name: attendance
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Charts
+  fl_chart: ^0.68.0
+
+  # Firebase
+  firebase_core: ^3.15.2
+  firebase_auth: ^5.7.0
+  cloud_firestore: ^5.6.12
+  firebase_storage: ^12.4.4
+
+  # State Management
+  provider: ^6.1.5
+
+  # QR Scanner
+  mobile_scanner: ^7.4.0
+
+  # Offline Storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+
+  # Internet Connection
+  internet_connection_checker_plus: ^2.7.2
+
+  # PDF
+  pdf: ^3.11.3
+  printing: ^5.11.1
+
+  # Excel Export
+  excel: ^2.1.0
+
+  # File Handling
+  file_picker: ^12.1.1
+  path_provider: ^2.1.5
+
+  # HTTP - Cloudinary image upload
+  http: ^1.5.0
+
+  # Share Files
+  share_plus: ^13.3.0
+
+  # Date Formatting
+  intl: ^0.20.2
+
+  # SVG Images
+  flutter_svg: ^2.2.0
+
+  # Image Picker
+  image_picker: ^1.1.2
+  flutter_launcher_icons: ^0.14.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/trace_icon.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/logo.png
+    - assets/logo1.png
+    - assets/back1.png
+    - assets/icon/trace_icon.png
+
+  # Fonts
+  # Uncomment when the Poppins font files exist:
+  #
+  # fonts:
+  #   - family: Poppins
+  #     fonts:
+  #       - asset: assets/fonts/Poppins-Regular.ttf
+  #       - asset: assets/fonts/Poppins-Bold.ttf
