@@ -10,6 +10,7 @@ import 'super_admin_attendance_screen.dart';
 import 'super_admin_common.dart' as common;
 import 'super_admin_dashboard_screen.dart';
 import 'super_admin_events_screen.dart';
+import 'super_admin_feedback_screen.dart';
 import 'super_admin_reports_screen.dart';
 import 'super_admin_settings_screen.dart';
 import 'super_admin_students_screen.dart';
@@ -59,6 +60,11 @@ class _SuperAdminNavigationScreenState
       activeIcon: Icons.bar_chart_rounded,
     ),
     _NavItem(
+      title: 'Feedback',
+      icon: Icons.rate_review_outlined,
+      activeIcon: Icons.rate_review_rounded,
+    ),
+    _NavItem(
       title: 'Settings',
       icon: Icons.settings_outlined,
       activeIcon: Icons.settings_rounded,
@@ -84,6 +90,7 @@ class _SuperAdminNavigationScreenState
       SuperAdminAttendanceScreen(),
       SuperAdminEventsScreen(),
       SuperAdminReportsScreen(),
+      const SuperAdminFeedbackScreen(),
       SuperAdminSettingsScreen(),
     ];
   }

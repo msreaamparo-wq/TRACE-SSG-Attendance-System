@@ -5,21 +5,23 @@ import 'package:internet_connection_checker_plus/internet_connection_checker_plu
 
 import 'package:attendance/services/firestore_service.dart';
 
-/// Stores attendance scans locally when offline and automatically
+/// Stores attendance records locally when offline and automatically
 /// synchronizes them to Firestore when the connection returns.
 ///
 /// Offline flow:
 ///
 ///   Time In / Time Out
 ///          ↓
-///     Hive queue
+///   Campus GPS Verification
 ///          ↓
-///   internet returns
+///      Hive Queue
 ///          ↓
-///    Firestore sync
+///   Internet returns
+///          ↓
+///     Firestore Sync
 ///
-/// The queue also keeps track of pending Time In / Time Out records
-/// so the app can make local decisions while offline.
+/// GPS verification data is preserved while offline and restored
+/// when the queued attendance record is synchronized.
 class AttendanceQueueService {
   AttendanceQueueService._();
 
@@ -49,7 +51,6 @@ class AttendanceQueueService {
   final StreamController<int> _pendingCountController =
   StreamController<int>.broadcast();
 
-  /// Emits the current number of unsynchronized attendance records.
   Stream<int> get pendingCountStream =>
       _pendingCountController.stream;
 
@@ -74,24 +75,26 @@ class AttendanceQueueService {
   // ============================================================
 
   Future<void> init() async {
-    // Open the pending attendance queue.
     _box = await Hive.openBox(_boxName);
 
     _emitCount();
 
     // ----------------------------------------------------------
-    // AUTO-SYNC WHEN INTERNET RETURNS
+    // AUTO SYNC WHEN INTERNET RETURNS
     // ----------------------------------------------------------
 
-    _connSub =
-        InternetConnection().onStatusChange.listen((status) {
-          if (status == InternetStatus.connected) {
-            syncPending();
-          }
-        });
+    await _connSub?.cancel();
+
+    _connSub = InternetConnection().onStatusChange.listen(
+          (status) {
+        if (status == InternetStatus.connected) {
+          syncPending();
+        }
+      },
+    );
 
     // ----------------------------------------------------------
-    // TRY TO SYNC ANY LEFTOVER RECORDS
+    // TRY TO SYNC EXISTING QUEUE
     // ----------------------------------------------------------
 
     await syncPending();
@@ -103,6 +106,7 @@ class AttendanceQueueService {
 
   Future<void> dispose() async {
     await _connSub?.cancel();
+    _connSub = null;
 
     if (!_pendingCountController.isClosed) {
       await _pendingCountController.close();
@@ -115,17 +119,14 @@ class AttendanceQueueService {
 
   int get pendingCount => _box?.length ?? 0;
 
-  bool get hasPendingAttendance =>
-      pendingCount > 0;
+  bool get hasPendingAttendance => pendingCount > 0;
 
   void _emitCount() {
     if (_pendingCountController.isClosed) {
       return;
     }
 
-    _pendingCountController.add(
-      pendingCount,
-    );
+    _pendingCountController.add(pendingCount);
   }
 
   // ============================================================
@@ -133,8 +134,7 @@ class AttendanceQueueService {
   // ============================================================
 
   Future<bool> isOnline() async {
-    return await InternetConnection()
-        .hasInternetAccess;
+    return await InternetConnection().hasInternetAccess;
   }
 
   // ============================================================
@@ -146,30 +146,61 @@ class AttendanceQueueService {
     required String userId,
     required String studentId,
     required String timeInStatus,
+
+    // GPS verification
+    double? latitude,
+    double? longitude,
+    bool? locationVerified,
+    double? locationAccuracy,
   }) async {
     final cleanEventId = eventId.trim();
     final cleanUserId = userId.trim();
     final cleanStudentId = studentId.trim();
 
-    if (cleanEventId.isEmpty ||
-        cleanStudentId.isEmpty) {
+    if (cleanEventId.isEmpty || cleanStudentId.isEmpty) {
       throw ArgumentError(
         'eventId and studentId are required.',
       );
     }
 
-    await _pendingBox.add({
+    final record = <String, dynamic>{
       'type': 'timeIn',
       'eventId': cleanEventId,
       'userId': cleanUserId,
       'studentId': cleanStudentId,
-      'timeInStatus':
-      timeInStatus.trim().isEmpty
+      'timeInStatus': timeInStatus.trim().isEmpty
           ? 'on-time'
           : timeInStatus.trim(),
-      'queuedAt':
-      DateTime.now().toIso8601String(),
-    });
+
+      // Actual time when the SSG officer recorded the attendance
+      // while offline.
+      'recordedAt': DateTime.now().toIso8601String(),
+
+      // Time when the record was placed into Hive.
+      'queuedAt': DateTime.now().toIso8601String(),
+    };
+
+    // ----------------------------------------------------------
+    // GPS DATA
+    // ----------------------------------------------------------
+
+    if (latitude != null) {
+      record['latitude'] = latitude;
+    }
+
+    if (longitude != null) {
+      record['longitude'] = longitude;
+    }
+
+    if (locationVerified != null) {
+      record['locationVerified'] = locationVerified;
+    }
+
+    if (locationAccuracy != null) {
+      record['locationAccuracy'] = locationAccuracy;
+    }
+
+    await _pendingBox.add(record);
 
     _emitCount();
   }
@@ -183,30 +214,60 @@ class AttendanceQueueService {
     required String userId,
     required String studentId,
     required String timeOutStatus,
+
+    // GPS verification
+    double? latitude,
+    double? longitude,
+    bool? locationVerified,
+    double? locationAccuracy,
   }) async {
     final cleanEventId = eventId.trim();
     final cleanUserId = userId.trim();
     final cleanStudentId = studentId.trim();
 
-    if (cleanEventId.isEmpty ||
-        cleanStudentId.isEmpty) {
+    if (cleanEventId.isEmpty || cleanStudentId.isEmpty) {
       throw ArgumentError(
         'eventId and studentId are required.',
       );
     }
 
-    await _pendingBox.add({
+    final record = <String, dynamic>{
       'type': 'timeOut',
       'eventId': cleanEventId,
       'userId': cleanUserId,
       'studentId': cleanStudentId,
-      'timeOutStatus':
-      timeOutStatus.trim().isEmpty
+      'timeOutStatus': timeOutStatus.trim().isEmpty
           ? 'on-time'
           : timeOutStatus.trim(),
-      'queuedAt':
-      DateTime.now().toIso8601String(),
-    });
+
+      // Actual time when the SSG officer recorded the attendance.
+      'recordedAt': DateTime.now().toIso8601String(),
+
+      // Time when the record was placed into Hive.
+      'queuedAt': DateTime.now().toIso8601String(),
+    };
+
+    // ----------------------------------------------------------
+    // GPS DATA
+    // ----------------------------------------------------------
+
+    if (latitude != null) {
+      record['latitude'] = latitude;
+    }
+
+    if (longitude != null) {
+      record['longitude'] = longitude;
+    }
+
+    if (locationVerified != null) {
+      record['locationVerified'] = locationVerified;
+    }
+
+    if (locationAccuracy != null) {
+      record['locationAccuracy'] = locationAccuracy;
+    }
+
+    await _pendingBox.add(record);
 
     _emitCount();
   }
@@ -215,43 +276,27 @@ class AttendanceQueueService {
   // READ QUEUED RECORDS
   // ============================================================
 
-  List<Map<String, dynamic>>
-  getPendingRecords() {
-    final records =
-    <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> getPendingRecords() {
+    final records = <Map<String, dynamic>>[];
 
-    for (final key
-    in _pendingBox.keys) {
-      final raw =
-      _pendingBox.get(key);
+    for (final key in _pendingBox.keys) {
+      final raw = _pendingBox.get(key);
 
       if (raw == null || raw is! Map) {
         continue;
       }
 
-      records.add(
-        {
-          '_key': key,
-          ...Map<String, dynamic>.from(
-            raw,
-          ),
-        },
-      );
+      records.add({
+        '_key': key,
+        ...Map<String, dynamic>.from(raw),
+      });
     }
 
-    // Keep records in queue order.
     records.sort((a, b) {
-      final aTime =
-      (a['queuedAt'] ?? '')
-          .toString();
+      final aTime = (a['queuedAt'] ?? '').toString();
+      final bTime = (b['queuedAt'] ?? '').toString();
 
-      final bTime =
-      (b['queuedAt'] ?? '')
-          .toString();
-
-      return aTime.compareTo(
-        bTime,
-      );
+      return aTime.compareTo(bTime);
     });
 
     return records;
@@ -261,53 +306,36 @@ class AttendanceQueueService {
   // FIND PENDING RECORDS FOR STUDENT + EVENT
   // ============================================================
 
-  List<Map<String, dynamic>>
-  getPendingRecordsForStudent({
+  List<Map<String, dynamic>> getPendingRecordsForStudent({
     required String eventId,
     required String studentId,
   }) {
-    final cleanEventId =
-    eventId.trim();
+    final cleanEventId = eventId.trim();
+    final cleanStudentId = studentId.trim();
 
-    final cleanStudentId =
-    studentId.trim();
-
-    if (cleanEventId.isEmpty ||
-        cleanStudentId.isEmpty) {
+    if (cleanEventId.isEmpty || cleanStudentId.isEmpty) {
       return [];
     }
 
-    final records =
-    <Map<String, dynamic>>[];
+    final records = <Map<String, dynamic>>[];
 
-    for (final key
-    in _pendingBox.keys) {
-      final raw =
-      _pendingBox.get(key);
+    for (final key in _pendingBox.keys) {
+      final raw = _pendingBox.get(key);
 
       if (raw == null || raw is! Map) {
         continue;
       }
 
-      final record =
-      Map<String, dynamic>.from(
-        raw,
-      );
+      final record = Map<String, dynamic>.from(raw);
 
       final recordEventId =
-      (record['eventId'] ?? '')
-          .toString()
-          .trim();
+      (record['eventId'] ?? '').toString().trim();
 
       final recordStudentId =
-      (record['studentId'] ?? '')
-          .toString()
-          .trim();
+      (record['studentId'] ?? '').toString().trim();
 
-      if (recordEventId ==
-          cleanEventId &&
-          recordStudentId ==
-              cleanStudentId) {
+      if (recordEventId == cleanEventId &&
+          recordStudentId == cleanStudentId) {
         records.add({
           '_key': key,
           ...record,
@@ -316,17 +344,10 @@ class AttendanceQueueService {
     }
 
     records.sort((a, b) {
-      final aTime =
-      (a['queuedAt'] ?? '')
-          .toString();
+      final aTime = (a['queuedAt'] ?? '').toString();
+      final bTime = (b['queuedAt'] ?? '').toString();
 
-      final bTime =
-      (b['queuedAt'] ?? '')
-          .toString();
-
-      return aTime.compareTo(
-        bTime,
-      );
+      return aTime.compareTo(bTime);
     });
 
     return records;
@@ -336,29 +357,11 @@ class AttendanceQueueService {
   // LOCAL ATTENDANCE STATE
   // ============================================================
 
-  /// Returns the attendance state that can be determined from
-  /// locally queued records.
-  ///
-  /// Example:
-  ///
-  /// queued Time In only:
-  ///   hasTimeIn = true
-  ///   hasTimeOut = false
-  ///
-  /// queued Time Out only:
-  ///   hasTimeIn = false
-  ///   hasTimeOut = true
-  ///
-  /// queued both:
-  ///   hasTimeIn = true
-  ///   hasTimeOut = true
-  PendingAttendanceState
-  getPendingAttendanceState({
+  PendingAttendanceState getPendingAttendanceState({
     required String eventId,
     required String studentId,
   }) {
-    final records =
-    getPendingRecordsForStudent(
+    final records = getPendingRecordsForStudent(
       eventId: eventId,
       studentId: studentId,
     );
@@ -367,9 +370,7 @@ class AttendanceQueueService {
     bool hasTimeOut = false;
 
     for (final record in records) {
-      final type =
-      (record['type'] ?? '')
-          .toString();
+      final type = (record['type'] ?? '').toString();
 
       if (type == 'timeIn') {
         hasTimeIn = true;
@@ -394,17 +395,14 @@ class AttendanceQueueService {
     required String eventId,
     required String studentId,
   }) {
-    final records =
-    getPendingRecordsForStudent(
+    final records = getPendingRecordsForStudent(
       eventId: eventId,
       studentId: studentId,
     );
 
     return records.any(
           (record) =>
-      (record['type'] ?? '')
-          .toString() ==
-          'timeIn',
+      (record['type'] ?? '').toString() == 'timeIn',
     );
   }
 
@@ -416,17 +414,14 @@ class AttendanceQueueService {
     required String eventId,
     required String studentId,
   }) {
-    final records =
-    getPendingRecordsForStudent(
+    final records = getPendingRecordsForStudent(
       eventId: eventId,
       studentId: studentId,
     );
 
     return records.any(
           (record) =>
-      (record['type'] ?? '')
-          .toString() ==
-          'timeOut',
+      (record['type'] ?? '').toString() == 'timeOut',
     );
   }
 
@@ -439,17 +434,14 @@ class AttendanceQueueService {
     required String studentId,
     required String type,
   }) {
-    final records =
-    getPendingRecordsForStudent(
+    final records = getPendingRecordsForStudent(
       eventId: eventId,
       studentId: studentId,
     );
 
     return records.any(
           (record) =>
-      (record['type'] ?? '')
-          .toString() ==
-          type,
+      (record['type'] ?? '').toString() == type,
     );
   }
 
@@ -457,9 +449,7 @@ class AttendanceQueueService {
   // REMOVE ONE RECORD
   // ============================================================
 
-  Future<void> removePendingRecord(
-      dynamic key,
-      ) async {
+  Future<void> removePendingRecord(dynamic key) async {
     await _pendingBox.delete(key);
 
     _emitCount();
@@ -476,6 +466,58 @@ class AttendanceQueueService {
   }
 
   // ============================================================
+  // CONVERTERS
+  // ============================================================
+
+  double? _toDouble(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    return double.tryParse(value.toString());
+  }
+
+  bool? _toBool(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value is bool) {
+      return value;
+    }
+
+    final text = value.toString().trim().toLowerCase();
+
+    if (text == 'true') {
+      return true;
+    }
+
+    if (text == 'false') {
+      return false;
+    }
+
+    return null;
+  }
+
+  DateTime? _toDateTime(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    if (value is DateTime) {
+      return value;
+    }
+
+    return DateTime.tryParse(
+      value.toString(),
+    );
+  }
+
+  // ============================================================
   // SYNCHRONIZE
   // ============================================================
 
@@ -483,8 +525,9 @@ class AttendanceQueueService {
   ///
   /// Records are processed in queue order.
   ///
-  /// Time In and Time Out records for the same student/event
-  /// therefore remain ordered when the device reconnects.
+  /// GPS data collected while offline is preserved.
+  ///
+  /// The original offline recording time is also preserved.
   Future<void> syncPending() async {
     if (_isSyncing) {
       return;
@@ -505,66 +548,64 @@ class AttendanceQueueService {
     _isSyncing = true;
 
     try {
-      final keys =
-      _pendingBox.keys.toList();
+      final records = getPendingRecords();
 
-      for (final key in keys) {
-        // Connection may have disappeared during sync.
+      for (final record in records) {
         if (!await isOnline()) {
           break;
         }
 
-        final raw =
-        _pendingBox.get(key);
-
-        if (raw == null ||
-            raw is! Map) {
-          await _pendingBox.delete(
-            key,
-          );
-          continue;
-        }
-
-        final record =
-        Map<String, dynamic>.from(
-          raw,
-        );
+        final key = record['_key'];
 
         try {
           final type =
-          (record['type'] ?? '')
-              .toString();
+          (record['type'] ?? '').toString();
 
           final eventId =
-          (record['eventId'] ?? '')
-              .toString()
-              .trim();
+          (record['eventId'] ?? '').toString().trim();
 
           final userId =
-          (record['userId'] ?? '')
-              .toString()
-              .trim();
+          (record['userId'] ?? '').toString().trim();
 
           final studentId =
-          (record['studentId'] ?? '')
-              .toString()
-              .trim();
+          (record['studentId'] ?? '').toString().trim();
+
+          final latitude =
+          _toDouble(record['latitude']);
+
+          final longitude =
+          _toDouble(record['longitude']);
+
+          final locationVerified =
+          _toBool(record['locationVerified']);
+
+          final locationAccuracy =
+          _toDouble(record['locationAccuracy']);
+
+          final recordedAt =
+          _toDateTime(record['recordedAt']);
 
           // ----------------------------------------------------
           // TIME IN
           // ----------------------------------------------------
 
           if (type == 'timeIn') {
-            await FirestoreService
-                .instance
-                .markAttendance(
+            await FirestoreService.instance.markAttendance(
               eventId: eventId,
               userId: userId,
               studentId: studentId,
               timeInStatus:
-              (record['timeInStatus'] ??
-                  'on-time')
+              (record['timeInStatus'] ?? 'on-time')
                   .toString(),
+
+              // Original recording time
+              recordedAt: recordedAt,
+
+              // Restore GPS data
+              latitude: latitude,
+              longitude: longitude,
+              locationVerified: locationVerified,
+              locationAccuracy: locationAccuracy,
             );
           }
 
@@ -573,16 +614,22 @@ class AttendanceQueueService {
           // ----------------------------------------------------
 
           else if (type == 'timeOut') {
-            await FirestoreService
-                .instance
-                .markTimeOut(
+            await FirestoreService.instance.markTimeOut(
               eventId: eventId,
               userId: userId,
               studentId: studentId,
               timeOutStatus:
-              (record['timeOutStatus'] ??
-                  'on-time')
+              (record['timeOutStatus'] ?? 'on-time')
                   .toString(),
+
+              // Original recording time
+              recordedAt: recordedAt,
+
+              // Restore GPS data
+              latitude: latitude,
+              longitude: longitude,
+              locationVerified: locationVerified,
+              locationAccuracy: locationAccuracy,
             );
           }
 
@@ -591,11 +638,7 @@ class AttendanceQueueService {
           // ----------------------------------------------------
 
           else {
-            // Unknown queue item should not remain forever.
-            await _pendingBox.delete(
-              key,
-            );
-
+            await _pendingBox.delete(key);
             continue;
           }
 
@@ -603,56 +646,29 @@ class AttendanceQueueService {
           // SUCCESS
           // ----------------------------------------------------
 
-          await _pendingBox.delete(
-            key,
-          );
+          await _pendingBox.delete(key);
         } catch (e) {
-          final message =
-          e.toString();
-
-          // ----------------------------------------------------
-          // DUPLICATE TIME IN
-          // ----------------------------------------------------
+          final message = e.toString();
 
           final duplicateTimeIn =
           message.contains(
             'already marked Present',
           );
 
-          // ----------------------------------------------------
-          // DUPLICATE TIME OUT
-          // ----------------------------------------------------
-
           final duplicateTimeOut =
           message.contains(
             'already marked for time out',
           );
 
-          // A duplicate means the record has already
-          // reached Firestore, so it is safe to remove
-          // this queued copy.
-          if (duplicateTimeIn ||
-              duplicateTimeOut) {
-            await _pendingBox.delete(
-              key,
-            );
-
+          // Already recorded in Firestore,
+          // so the queued duplicate can be removed.
+          if (duplicateTimeIn || duplicateTimeOut) {
+            await _pendingBox.delete(key);
             continue;
           }
 
-          // ----------------------------------------------------
-          // TEMPORARY FAILURE
-          // ----------------------------------------------------
-          //
-          // Any other failure leaves the record in the queue.
-          //
-          // Examples:
-          // - internet dropped during sync
-          // - Firebase unavailable
-          // - deadline exceeded
-          // - server temporarily unreachable
-          //
-          // It will retry on the next connectivity event.
+          // Any other error leaves the record
+          // inside the queue for another retry.
         }
       }
     } finally {

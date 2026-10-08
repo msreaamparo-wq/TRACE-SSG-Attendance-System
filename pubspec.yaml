@@ -12,6 +12,8 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
+  qr_flutter: ^4.1.0
+  geolocator: ^14.0.2
 
   # Charts
   fl_chart: ^0.68.0
@@ -60,13 +62,18 @@ dependencies:
 
   # Image Picker
   image_picker: ^1.1.2
-  flutter_launcher_icons: ^0.14.4
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+
+  flutter_launcher_icons: ^0.14.4
+
+# ================================================================
+# APP ICON
+# ================================================================
 
 flutter_launcher_icons:
   android: true
