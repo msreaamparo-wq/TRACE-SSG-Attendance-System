@@ -64,8 +64,8 @@ class _StudentsScreenState extends State<StudentsScreen> {
   String _selectedYearLevel =
       'All Years';
 
-  String _selectedAcademicYear =
-      'All Academic Years';
+  // Event year filter starts at 2026.
+  String _selectedEventYear = '2026';
 
   // ==============================================================
   // INIT
@@ -532,14 +532,65 @@ class _StudentsScreenState extends State<StudentsScreen> {
             );
           }
 
-          final eventDocs =
-              eventSnapshot
-                  .data!
-                  .docs;
+          final allEventDocs =
+              eventSnapshot.data!.docs;
 
-          if (eventDocs.isEmpty) {
+          if (allEventDocs.isEmpty) {
             return _buildMessage(
               'No events yet. Create an event first.',
+            );
+          }
+
+          // Build event-year options beginning with 2026.
+          int latestEventYear = DateTime.now().year;
+          for (final doc in allEventDocs) {
+            final data = doc.data() as Map<String, dynamic>;
+            final eventDate = data['eventDate'];
+            if (eventDate is Timestamp &&
+                eventDate.toDate().year > latestEventYear) {
+              latestEventYear = eventDate.toDate().year;
+            }
+          }
+
+          final List<String> eventYearOptions = [
+            for (int year = 2026; year <= latestEventYear; year++)
+              year.toString(),
+          ];
+
+          if (eventYearOptions.isEmpty) {
+            eventYearOptions.add('2026');
+          }
+
+          final effectiveEventYear =
+          eventYearOptions.contains(_selectedEventYear)
+              ? _selectedEventYear
+              : eventYearOptions.first;
+
+          final eventDocs = allEventDocs.where((doc) {
+            final data = doc.data() as Map<String, dynamic>;
+            final eventDate = data['eventDate'];
+            return eventDate is Timestamp &&
+                eventDate.toDate().year.toString() == effectiveEventYear;
+          }).toList();
+
+          if (eventDocs.isEmpty) {
+            return Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  color: traceNavy,
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: _buildEventYearPicker(
+                    yearOptions: eventYearOptions,
+                    selectedYear: effectiveEventYear,
+                  ),
+                ),
+                Expanded(
+                  child: _buildMessage(
+                    'No events found for $effectiveEventYear.',
+                  ),
+                ),
+              ],
             );
           }
 
@@ -547,30 +598,16 @@ class _StudentsScreenState extends State<StudentsScreen> {
           // EFFECTIVE EVENT
           // ========================================================
 
-          final validIds =
-          eventDocs
-              .map(
-                (doc) => doc.id,
-          )
-              .toSet();
+          final validIds = eventDocs.map((doc) => doc.id).toSet();
 
-          final String
-          effectiveEventId =
-          (
-              _selectedEventId !=
-                  null &&
-                  validIds.contains(
-                    _selectedEventId,
-                  )
-          )
+          final String effectiveEventId =
+          (_selectedEventId != null &&
+              validIds.contains(_selectedEventId))
               ? _selectedEventId!
               : eventDocs.first.id;
 
-          final selectedEventDoc =
-          eventDocs.firstWhere(
-                (doc) =>
-            doc.id ==
-                effectiveEventId,
+          final selectedEventDoc = eventDocs.firstWhere(
+                (doc) => doc.id == effectiveEventId,
           );
 
           final selectedEventData =
@@ -676,52 +713,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
               )
                   ? _selectedYearLevel
                   : 'All Years';
-
-              // ====================================================
-              // ACADEMIC YEAR OPTIONS
-              // ====================================================
-
-              final List<String>
-              detectedAcademicYears =
-              userDocs
-                  .map(
-                    (doc) {
-                  final data =
-                  doc.data()
-                  as Map<String,
-                      dynamic>;
-
-                  return _getAcademicYear(
-                    data,
-                  );
-                },
-              )
-                  .where(
-                    (value) =>
-                value
-                    .trim()
-                    .isNotEmpty,
-              )
-                  .toSet()
-                  .toList();
-
-              detectedAcademicYears.sort(
-                _compareAcademicYears,
-              );
-
-              final List<String>
-              academicYearOptions = [
-                'All Academic Years',
-                ...detectedAcademicYears,
-              ];
-
-              final String
-              effectiveAcademicYear =
-              academicYearOptions.contains(
-                _selectedAcademicYear,
-              )
-                  ? _selectedAcademicYear
-                  : 'All Academic Years';
 
               // ====================================================
               // ATTENDANCE STREAM
@@ -920,27 +911,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
                   }
 
                   // =================================================
-                  // ACADEMIC YEAR FILTER
-                  // =================================================
-
-                  if (effectiveAcademicYear !=
-                      'All Academic Years') {
-                    students =
-                        students
-                            .where(
-                              (student) =>
-                          student
-                              .academicYear
-                              .trim()
-                              .toLowerCase() ==
-                              effectiveAcademicYear
-                                  .trim()
-                                  .toLowerCase(),
-                        )
-                            .toList();
-                  }
-
-                  // =================================================
                   // SEARCH FILTER
                   // =================================================
 
@@ -1131,49 +1101,24 @@ class _StudentsScreenState extends State<StudentsScreen> {
                             // EVENT
                             // =========================================
 
+                            _buildEventYearPicker(
+                              yearOptions: eventYearOptions,
+                              selectedYear: effectiveEventYear,
+                            ),
+
+                            const SizedBox(height: 10),
+
                             _buildEventPicker(
-                              eventDocs:
-                              eventDocs,
-                              selectedEventId:
-                              effectiveEventId,
-                              selectedEventName:
-                              selectedEventName,
+                              eventDocs: eventDocs,
+                              selectedEventId: effectiveEventId,
+                              selectedEventName: selectedEventName,
                             ),
 
-                            const SizedBox(
-                              height: 10,
-                            ),
+                            const SizedBox(height: 10),
 
-                            // =========================================
-                            // YEAR + ACADEMIC YEAR
-                            // =========================================
-
-                            Row(
-                              children: [
-                                Expanded(
-                                  child:
-                                  _buildYearPicker(
-                                    yearOptions:
-                                    yearOptions,
-                                    selectedYearLevel:
-                                    effectiveYearLevel,
-                                  ),
-                                ),
-
-                                const SizedBox(
-                                  width: 10,
-                                ),
-
-                                Expanded(
-                                  child:
-                                  _buildAcademicYearPicker(
-                                    academicYearOptions:
-                                    academicYearOptions,
-                                    selectedAcademicYear:
-                                    effectiveAcademicYear,
-                                  ),
-                                ),
-                              ],
+                            _buildYearPicker(
+                              yearOptions: yearOptions,
+                              selectedYearLevel: effectiveYearLevel,
                             ),
 
                             const SizedBox(
@@ -1462,6 +1407,72 @@ class _StudentsScreenState extends State<StudentsScreen> {
   }
 
   // ================================================================
+  // EVENT YEAR PICKER
+  // ================================================================
+
+  Widget _buildEventYearPicker({
+    required List<String> yearOptions,
+    required String selectedYear,
+  }) {
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.10),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selectedYear,
+          isExpanded: true,
+          icon: const Icon(
+            Icons.keyboard_arrow_down_rounded,
+            color: traceAccentBlue,
+            size: 20,
+          ),
+          style: const TextStyle(
+            color: traceTextPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+          items: yearOptions.map((year) {
+            return DropdownMenuItem<String>(
+              value: year,
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.calendar_month_outlined,
+                    size: 17,
+                    color: traceAccentBlue,
+                  ),
+                  const SizedBox(width: 8),
+                  Text('Events in $year'),
+                ],
+              ),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value == null) return;
+            setState(() {
+              _selectedEventYear = value;
+              _selectedEventId = null;
+              _selectedYearLevel = 'All Years';
+              _statusFilter = _StatusFilter.all;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  // ================================================================
   // EVENT PICKER
   // ================================================================
 
@@ -1602,9 +1613,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
               _selectedYearLevel =
               'All Years';
 
-              _selectedAcademicYear =
-              'All Academic Years';
-
               _statusFilter =
                   _StatusFilter.all;
             });
@@ -1738,138 +1746,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
 
             setState(() {
               _selectedYearLevel =
-                  value;
-            });
-          },
-        ),
-      ),
-    );
-  }
-
-  // ================================================================
-  // ACADEMIC YEAR PICKER
-  // ================================================================
-
-  Widget _buildAcademicYearPicker({
-    required List<String>
-    academicYearOptions,
-    required String
-    selectedAcademicYear,
-  }) {
-    return Container(
-      height: 52,
-
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 12,
-      ),
-
-      decoration:
-      BoxDecoration(
-        color:
-        Colors.white,
-
-        borderRadius:
-        BorderRadius.circular(
-          14,
-        ),
-
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black
-                .withOpacity(
-              0.10,
-            ),
-            blurRadius: 8,
-            offset:
-            const Offset(
-              0,
-              2,
-            ),
-          ),
-        ],
-      ),
-
-      child:
-      DropdownButtonHideUnderline(
-        child:
-        DropdownButton<String>(
-          value:
-          selectedAcademicYear,
-
-          isExpanded:
-          true,
-
-          icon: const Icon(
-            Icons
-                .keyboard_arrow_down_rounded,
-            color:
-            traceAccentBlue,
-            size: 19,
-          ),
-
-          style:
-          const TextStyle(
-            color:
-            traceTextPrimary,
-            fontSize: 12.5,
-            fontWeight:
-            FontWeight.w700,
-          ),
-
-          items:
-          academicYearOptions
-              .map(
-                (year) {
-              final bool isAll =
-                  year ==
-                      'All Academic Years';
-
-              return DropdownMenuItem<
-                  String>(
-                value:
-                year,
-
-                child: Row(
-                  children: [
-                    Icon(
-                      isAll
-                          ? Icons
-                          .calendar_month_outlined
-                          : Icons
-                          .event_note_outlined,
-                      size: 16,
-                      color:
-                      traceAccentBlue,
-                    ),
-
-                    const SizedBox(
-                      width: 7,
-                    ),
-
-                    Expanded(
-                      child: Text(
-                        year,
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow
-                            .ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ).toList(),
-
-          onChanged:
-              (value) {
-            if (value == null) {
-              return;
-            }
-
-            setState(() {
-              _selectedAcademicYear =
                   value;
             });
           },
@@ -2093,8 +1969,6 @@ class _StudentsScreenState extends State<StudentsScreen> {
         _searchQuery.isNotEmpty ||
             _selectedYearLevel !=
                 'All Years' ||
-            _selectedAcademicYear !=
-                'All Academic Years' ||
             _statusFilter !=
                 _StatusFilter.all;
 

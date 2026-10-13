@@ -370,6 +370,8 @@ class _StudentRecordsSectionState extends State<_StudentRecordsSection> {
 
   String _collegeFilter = 'All';
   String _debouncedQuery = '';
+  int _currentPage = 0;
+  static const int _pageSize = 10;
   Timer? _debounce;
 
   @override
@@ -387,6 +389,7 @@ class _StudentRecordsSectionState extends State<_StudentRecordsSection> {
       if (!mounted) return;
       setState(() {
         _debouncedQuery = value.trim().toLowerCase();
+        _currentPage = 0;
       });
     });
   }
@@ -396,6 +399,7 @@ class _StudentRecordsSectionState extends State<_StudentRecordsSection> {
     _searchController.clear();
     setState(() {
       _debouncedQuery = '';
+      _currentPage = 0;
     });
   }
 
@@ -532,26 +536,169 @@ class _StudentRecordsSectionState extends State<_StudentRecordsSection> {
           // shrinking result set doesn't feel like a hard jump.
           // ========================================================
 
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            child: filtered.isEmpty
-                ? SizedBox(
-              key: const ValueKey('empty'),
-              height: 240,
-              child: SuperAdminCommon.empty(
-                _debouncedQuery.isEmpty && _collegeFilter == 'All'
-                    ? 'No students found.'
-                    : 'No students match your search.',
-                icon: Icons.school_outlined,
-              ),
-            )
-                : _StudentTable(
-              key: ValueKey('table-${filtered.length}'),
-              students: filtered,
-            ),
+          Builder(
+            builder: (context) {
+              final totalPages =
+              filtered.isEmpty ? 1 : (filtered.length / _pageSize).ceil();
+              final safePage = _currentPage.clamp(0, totalPages - 1).toInt();
+              final startIndex = safePage * _pageSize;
+              final endIndex = math.min(startIndex + _pageSize, filtered.length);
+              final pageStudents = filtered.isEmpty
+                  ? <QueryDocumentSnapshot<Map<String, dynamic>>>[]
+                  : filtered.sublist(startIndex, endIndex);
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: filtered.isEmpty
+                        ? SizedBox(
+                      key: const ValueKey('empty'),
+                      height: 240,
+                      child: SuperAdminCommon.empty(
+                        _debouncedQuery.isEmpty && _collegeFilter == 'All'
+                            ? 'No students found.'
+                            : 'No students match your search.',
+                        icon: Icons.school_outlined,
+                      ),
+                    )
+                        : _StudentTable(
+                      key: ValueKey('table-$safePage-${filtered.length}'),
+                      students: pageStudents,
+                    ),
+                  ),
+                  if (filtered.isNotEmpty) ...[
+                    const SizedBox(height: 14),
+                    _buildPagination(
+                      start: startIndex + 1,
+                      end: endIndex,
+                      total: filtered.length,
+                      currentPage: safePage,
+                      totalPages: totalPages,
+                    ),
+                  ],
+                ],
+              );
+            },
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildPagination({
+    required int start,
+    required int end,
+    required int total,
+    required int currentPage,
+    required int totalPages,
+  }) {
+    final bool canGoPrevious = currentPage > 0;
+    final bool canGoNext = currentPage < totalPages - 1;
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 480;
+        final rangeText = 'Showing $start–$end of $total students';
+
+        final previousButton = OutlinedButton.icon(
+          onPressed: canGoPrevious
+              ? () => setState(() => _currentPage = currentPage - 1)
+              : null,
+          icon: const Icon(Icons.chevron_left_rounded, size: 18),
+          label: const Text('Previous'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: TraceColors.textPrimary,
+            disabledForegroundColor: TraceColors.textTertiary,
+            side: const BorderSide(color: TraceColors.border),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(9),
+            ),
+            textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        );
+
+        final nextButton = ElevatedButton.icon(
+          onPressed: canGoNext
+              ? () => setState(() => _currentPage = currentPage + 1)
+              : null,
+          icon: const Text('Next'),
+          label: const Icon(Icons.chevron_right_rounded, size: 18),
+          iconAlignment: IconAlignment.end,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TraceColors.accent,
+            foregroundColor: Colors.white,
+            disabledBackgroundColor: TraceColors.canvas,
+            disabledForegroundColor: TraceColors.textTertiary,
+            elevation: 0,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(9),
+            ),
+            textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        );
+
+        if (compact) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                rangeText,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: TraceColors.textSecondary,
+                  fontSize: 11,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(child: previousButton),
+                  const SizedBox(width: 10),
+                  Expanded(child: nextButton),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Page ${currentPage + 1} of $totalPages',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: TraceColors.textTertiary,
+                  fontSize: 10,
+                ),
+              ),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(
+              child: Text(
+                rangeText,
+                style: const TextStyle(
+                  color: TraceColors.textSecondary,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+            Text(
+              'Page ${currentPage + 1} of $totalPages',
+              style: const TextStyle(
+                color: TraceColors.textTertiary,
+                fontSize: 10,
+              ),
+            ),
+            const SizedBox(width: 12),
+            previousButton,
+            const SizedBox(width: 8),
+            nextButton,
+          ],
+        );
+      },
     );
   }
 
@@ -604,6 +751,7 @@ class _StudentRecordsSectionState extends State<_StudentRecordsSection> {
         if (value == null) return;
         setState(() {
           _collegeFilter = value;
+          _currentPage = 0;
         });
       },
     );
@@ -985,9 +1133,9 @@ class _StudentTable extends StatelessWidget {
         child: DataTable(
           headingRowHeight: 46,
           dataRowMinHeight: 50,
-          dataRowMaxHeight: 58,
+          dataRowMaxHeight: 72,
           horizontalMargin: 14,
-          columnSpacing: 32,
+          columnSpacing: 24,
           headingRowColor: WidgetStateProperty.all(TraceColors.canvas),
           dividerThickness: 0.7,
           headingTextStyle: const TextStyle(
@@ -1134,11 +1282,12 @@ class _SoftTag extends StatelessWidget {
         borderRadius: BorderRadius.circular(7),
       ),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 130),
+        constraints: const BoxConstraints(maxWidth: 210),
         child: Text(
           text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          maxLines: 2,
+          softWrap: true,
+          overflow: TextOverflow.visible,
           style: const TextStyle(
             color: TraceColors.accent,
             fontSize: 9.5,
@@ -1172,94 +1321,85 @@ class _CourseChart extends StatelessWidget {
       ..sort((a, b) => b.value.compareTo(a.value));
 
     final visible = entries.take(6).toList();
+    final maxValue = visible.map((entry) => entry.value).fold<int>(1, math.max);
 
-    final maxY = visible.map((e) => e.value).fold<int>(1, math.max);
-
-    return BarChart(
-      BarChartData(
-        maxY: maxY.toDouble() + 2,
-        borderData: FlBorderData(show: false),
-        gridData: FlGridData(
-          show: true,
-          drawVerticalLine: false,
-          getDrawingHorizontalLine: (value) {
-            return FlLine(color: TraceColors.border, strokeWidth: 1);
-          },
-        ),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+    return Column(
+      children: [
+        for (int index = 0; index < visible.length; index++) ...[
+          if (index > 0) const SizedBox(height: 11),
+          _CourseBarRow(
+            name: visible[index].key,
+            count: visible[index].value,
+            maxCount: maxValue,
+            color: _chartPalette[index % _chartPalette.length],
           ),
-          rightTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
-          ),
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 25,
-              getTitlesWidget: (value, meta) {
-                return Text(
-                  value.toInt().toString(),
-                  style: const TextStyle(
-                    color: TraceColors.textTertiary,
-                    fontSize: 8,
-                  ),
-                );
-              },
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final index = value.toInt();
-
-                if (index < 0 || index >= visible.length) {
-                  return const SizedBox.shrink();
-                }
-
-                return Padding(
-                  padding: const EdgeInsets.only(top: 7),
-                  child: SizedBox(
-                    width: 62,
-                    child: Text(
-                      visible[index].key,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 7.5,
-                        color: TraceColors.textTertiary,
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
-        barGroups: [
-          for (int i = 0; i < visible.length; i++)
-            BarChartGroupData(
-              x: i,
-              barRods: [
-                BarChartRodData(
-                  toY: visible[i].value.toDouble(),
-                  width: 20,
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      TraceColors.accent.withValues(alpha: 0.55),
-                      TraceColors.accent,
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(5),
-                ),
-              ],
-            ),
         ],
-      ),
+      ],
+    );
+  }
+}
+
+class _CourseBarRow extends StatelessWidget {
+  final String name;
+  final int count;
+  final int maxCount;
+  final Color color;
+
+  const _CourseBarRow({
+    required this.name,
+    required this.count,
+    required this.maxCount,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ratio = maxCount == 0 ? 0.0 : count / maxCount;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          flex: 5,
+          child: Text(
+            name,
+            maxLines: 2,
+            softWrap: true,
+            overflow: TextOverflow.visible,
+            style: const TextStyle(
+              color: TraceColors.textSecondary,
+              fontSize: 10,
+              height: 1.2,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          flex: 4,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 8,
+              backgroundColor: TraceColors.canvas,
+              valueColor: AlwaysStoppedAnimation<Color>(color),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        SizedBox(
+          width: 28,
+          child: Text(
+            '$count',
+            textAlign: TextAlign.end,
+            style: const TextStyle(
+              color: TraceColors.textPrimary,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
