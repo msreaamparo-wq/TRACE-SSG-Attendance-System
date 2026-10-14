@@ -1,46 +1,43 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 
-import '../models/event_model.dart';
 import 'super_admin_common.dart';
 
+/// Super Admin event management screen.
+///
+/// The create/edit form intentionally follows the same layout and fields as
+/// AddEventScreen: event image upload to Cloudinary, date, venue, description,
+/// and the four attendance time-window fields.
 class SuperAdminEventsScreen extends StatefulWidget {
-  const SuperAdminEventsScreen({
-    super.key,
-  });
+  const SuperAdminEventsScreen({super.key});
 
   @override
-  State<SuperAdminEventsScreen> createState() =>
-      _SuperAdminEventsScreenState();
+  State<SuperAdminEventsScreen> createState() => _SuperAdminEventsScreenState();
 }
 
-class _SuperAdminEventsScreenState
-    extends State<SuperAdminEventsScreen> {
-  final TextEditingController _searchController =
-  TextEditingController();
+class _SuperAdminEventsScreenState extends State<SuperAdminEventsScreen> {
+  final TextEditingController _searchController = TextEditingController();
 
-  late final Stream<QuerySnapshot<Map<String, dynamic>>>
-  _eventsStream;
+  Stream<QuerySnapshot<Map<String, dynamic>>>? _eventsStream;
 
   static const int _pageSize = 4;
-
   int _currentPage = 0;
-
   String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
+    _createEventsStream();
+  }
 
-    _eventsStream = FirebaseFirestore.instance
-        .collection('events')
-        .orderBy(
-      'eventDate',
-      descending: false,
-    )
-        .limit(500)
-        .snapshots();
+  void _createEventsStream() {
+    _eventsStream = FirebaseFirestore.instance.collection('events').snapshots();
   }
 
   @override
@@ -49,10 +46,6 @@ class _SuperAdminEventsScreenState
     super.dispose();
   }
 
-  // ============================================================
-  // SEARCH
-  // ============================================================
-
   void _onSearchChanged(String value) {
     setState(() {
       _searchQuery = value.trim().toLowerCase();
@@ -60,1168 +53,144 @@ class _SuperAdminEventsScreenState
     });
   }
 
-  // ============================================================
-  // CLEAR SEARCH
-  // ============================================================
-
   void _clearSearch() {
     _searchController.clear();
-
     setState(() {
       _searchQuery = '';
       _currentPage = 0;
     });
   }
 
-  // ============================================================
-  // MANILA TIME
-  // ============================================================
-
-  static const Duration _manilaOffset =
-  Duration(hours: 8);
-
-  static DateTime _nowManila() {
-    return DateTime.now()
-        .toUtc()
-        .add(_manilaOffset);
-  }
-
-  // ============================================================
-  // STATUS
-  // ============================================================
-
-  String _computeStatus(
-      DateTime eventDate, {
-        String? existingStatus,
-      }) {
-    if ((existingStatus ?? '')
-        .toLowerCase()
-        .trim() ==
-        'cancelled') {
-      return 'cancelled';
-    }
-
-    final now = _nowManila();
-
-    final today = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    );
-
-    final day = DateTime(
-      eventDate.year,
-      eventDate.month,
-      eventDate.day,
-    );
-
-    if (day.isAfter(today)) {
-      return 'upcoming';
-    }
-
-    if (day.isAtSameMomentAs(today)) {
-      return 'active';
-    }
-
-    return 'ended';
-  }
-
-  String _displayStatus(String status) {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return 'Ongoing';
-      case 'ended':
-        return 'Completed';
-      case 'cancelled':
-        return 'Cancelled';
-      case 'upcoming':
-      default:
-        return 'Upcoming';
-    }
-  }
-
-  Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return TraceColors.warning;
-      case 'ended':
-        return TraceColors.success;
-      case 'cancelled':
-        return TraceColors.danger;
-      case 'upcoming':
-      default:
-        return const Color(0xFF2563EB);
-    }
-  }
-
-  // ============================================================
-  // STATS
-  // ============================================================
-
-  Widget _stats(
-      int total,
-      int upcoming,
-      int ongoing,
-      int completed,
-      double width,
-      ) {
-    final cards = [
-      _StatCard(
-        title: 'Total',
-        value: '$total',
-        icon: Icons.event_rounded,
-        accent: TraceColors.accent,
-      ),
-      _StatCard(
-        title: 'Upcoming',
-        value: '$upcoming',
-        icon: Icons.upcoming_rounded,
-        accent: const Color(0xFF2563EB),
-      ),
-      _StatCard(
-        title: 'Ongoing',
-        value: '$ongoing',
-        icon:
-        Icons.play_circle_outline_rounded,
-        accent: TraceColors.warning,
-      ),
-      _StatCard(
-        title: 'Completed',
-        value: '$completed',
-        icon:
-        Icons.check_circle_outline_rounded,
-        accent: TraceColors.success,
-      ),
-    ];
-
-    if (width < 650) {
-      return Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: cards[0],
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: cards[1],
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: cards[2],
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: cards[3],
-              ),
-            ],
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      children: [
-        Expanded(
-          child: cards[0],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: cards[1],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: cards[2],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: cards[3],
-        ),
-      ],
-    );
-  }
-
-  // ============================================================
-  // DIALOG FIELD DECORATION
-  // ============================================================
-
-  InputDecoration _dialogDecoration({
-    required String label,
-    required String hint,
-    required IconData icon,
-  }) {
-    return InputDecoration(
-      labelText: label,
-      hintText: hint,
-      labelStyle: const TextStyle(
-        color: TraceColors.textSecondary,
-        fontSize: 11.5,
-      ),
-      hintStyle: const TextStyle(
-        color: TraceColors.textTertiary,
-        fontSize: 11.5,
-      ),
-      prefixIcon: Icon(
-        icon,
-        size: 18,
-        color: TraceColors.textTertiary,
-      ),
-      filled: true,
-      fillColor: TraceColors.canvas,
-      contentPadding:
-      const EdgeInsets.symmetric(
-        horizontal: 14,
-        vertical: 13,
-      ),
-      border: OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(12),
-        borderSide: const BorderSide(
-          color: TraceColors.border,
-        ),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(12),
-        borderSide: const BorderSide(
-          color: TraceColors.border,
-        ),
-      ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius:
-        BorderRadius.circular(12),
-        borderSide: const BorderSide(
-          color: TraceColors.accent,
-          width: 1.2,
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // CREATE / EDIT EVENT
-  // ============================================================
-
-  Future<void> _showEventDialog({
-    String? id,
+  Future<void> _openEventForm({
+    String? eventId,
     Map<String, dynamic>? data,
   }) async {
-    final eventNameController =
-    TextEditingController(
-      text: SuperAdminCommon.text(
-        data ?? {},
-        ['eventName'],
+    // Use a full-page form instead of nesting a complex StatefulBuilder dialog.
+    // This matches AddEventScreen and avoids deactivated-dialog context issues.
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => _SuperAdminEventFormPage(
+          eventId: eventId,
+          initialData: data,
+        ),
       ),
     );
 
-    final venueController =
-    TextEditingController(
-      text: SuperAdminCommon.text(
-        data ?? {},
-        ['venue'],
-      ),
-    );
-
-    final descriptionController =
-    TextEditingController(
-      text: SuperAdminCommon.text(
-        data ?? {},
-        ['description'],
-      ),
-    );
-
-    DateTime selectedDate =
-        SuperAdminCommon.date(
-          data ?? {},
-          ['eventDate'],
-        ) ??
-            DateTime.now();
-
-    final existingStatus =
-    SuperAdminCommon.text(
-      data ?? {},
-      ['status'],
-    );
-
-    TimeOfDay? timeInStart =
-    _parseTime(
-      SuperAdminCommon.text(
-        data ?? {},
-        ['timeInStart'],
-      ),
-    );
-
-    TimeOfDay? timeInEnd =
-    _parseTime(
-      SuperAdminCommon.text(
-        data ?? {},
-        ['timeInEnd'],
-      ),
-    );
-
-    TimeOfDay? timeOutStart =
-    _parseTime(
-      SuperAdminCommon.text(
-        data ?? {},
-        ['timeOutStart'],
-      ),
-    );
-
-    TimeOfDay? timeOutEnd =
-    _parseTime(
-      SuperAdminCommon.text(
-        data ?? {},
-        ['timeOutEnd'],
-      ),
-    );
-
-    final formKey =
-    GlobalKey<FormState>();
-
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (
-              context,
-              setDialogState,
-              ) {
-            final previewStatus =
-            _computeStatus(
-              selectedDate,
-              existingStatus:
-              existingStatus,
-            );
-
-            final previewColor =
-            _statusColor(
-              previewStatus,
-            );
-
-            return Dialog(
-              backgroundColor:
-              TraceColors.surface,
-              insetPadding:
-              const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 24,
-              ),
-              shape:
-              RoundedRectangleBorder(
-                borderRadius:
-                BorderRadius.circular(20),
-              ),
-              child: ConstrainedBox(
-                constraints:
-                const BoxConstraints(
-                  maxWidth: 640,
-                ),
-                child: Form(
-                  key: formKey,
-                  child: SingleChildScrollView(
-                    padding:
-                    const EdgeInsets.all(22),
-                    child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 42,
-                              height: 42,
-                              alignment:
-                              Alignment.center,
-                              decoration:
-                              BoxDecoration(
-                                color: TraceColors
-                                    .accentSoft,
-                                borderRadius:
-                                BorderRadius.circular(
-                                  12,
-                                ),
-                              ),
-                              child:
-                              const Icon(
-                                Icons.event_rounded,
-                                color:
-                                TraceColors
-                                    .accent,
-                                size: 20,
-                              ),
-                            ),
-                            const SizedBox(
-                              width: 12,
-                            ),
-                            Expanded(
-                              child:
-                              Column(
-                                crossAxisAlignment:
-                                CrossAxisAlignment
-                                    .start,
-                                children: [
-                                  Text(
-                                    id == null
-                                        ? 'Create Event'
-                                        : 'Edit Event',
-                                    style:
-                                    const TextStyle(
-                                      color:
-                                      TraceColors
-                                          .textPrimary,
-                                      fontSize: 17,
-                                      fontWeight:
-                                      FontWeight
-                                          .w800,
-                                    ),
-                                  ),
-                                  const SizedBox(
-                                    height: 3,
-                                  ),
-                                  Text(
-                                    id == null
-                                        ? 'Create a new school event.'
-                                        : 'Update the event details.',
-                                    style:
-                                    const TextStyle(
-                                      color:
-                                      TraceColors
-                                          .textTertiary,
-                                      fontSize: 10.5,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(
-                          height: 20,
-                        ),
-                        TextFormField(
-                          controller:
-                          eventNameController,
-                          textCapitalization:
-                          TextCapitalization
-                              .sentences,
-                          decoration:
-                          _dialogDecoration(
-                            label: 'Event Name',
-                            hint:
-                            'Enter event name',
-                            icon:
-                            Icons.title_rounded,
-                          ),
-                          validator: (value) {
-                            if (value == null ||
-                                value.trim().isEmpty) {
-                              return 'Please enter an event name.';
-                            }
-
-                            return null;
-                          },
-                        ),
-                        const SizedBox(
-                          height: 13,
-                        ),
-                        TextFormField(
-                          controller:
-                          venueController,
-                          textCapitalization:
-                          TextCapitalization
-                              .words,
-                          decoration:
-                          _dialogDecoration(
-                            label: 'Venue',
-                            hint:
-                            'Enter event venue',
-                            icon: Icons
-                                .location_on_outlined,
-                          ),
-                        ),
-                        const SizedBox(
-                          height: 13,
-                        ),
-                        TextFormField(
-                          controller:
-                          descriptionController,
-                          textCapitalization:
-                          TextCapitalization
-                              .sentences,
-                          maxLines: 4,
-                          decoration:
-                          _dialogDecoration(
-                            label:
-                            'Description',
-                            hint:
-                            'Enter a short description',
-                            icon: Icons
-                                .description_outlined,
-                          ),
-                        ),
-                        const SizedBox(
-                          height: 13,
-                        ),
-                        _DateField(
-                          selectedDate:
-                          selectedDate,
-                          onTap: () async {
-                            final picked =
-                            await showDatePicker(
-                              context: context,
-                              firstDate:
-                              DateTime(2020),
-                              lastDate:
-                              DateTime(2035),
-                              initialDate:
-                              selectedDate,
-                            );
-
-                            if (picked == null) {
-                              return;
-                            }
-
-                            setDialogState(() {
-                              selectedDate =
-                                  picked;
-                            });
-                          },
-                        ),
-                        const SizedBox(
-                          height: 13,
-                        ),
-                        Container(
-                          width:
-                          double.infinity,
-                          padding:
-                          const EdgeInsets
-                              .symmetric(
-                            horizontal: 14,
-                            vertical: 13,
-                          ),
-                          decoration:
-                          BoxDecoration(
-                            color:
-                            TraceColors
-                                .canvas,
-                            borderRadius:
-                            BorderRadius.circular(
-                              12,
-                            ),
-                            border:
-                            Border.all(
-                              color:
-                              TraceColors
-                                  .border,
-                            ),
-                          ),
-                          child:
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.flag_outlined,
-                                size: 18,
-                                color:
-                                TraceColors
-                                    .textTertiary,
-                              ),
-                              const SizedBox(
-                                width: 10,
-                              ),
-                              Container(
-                                width: 9,
-                                height: 9,
-                                decoration:
-                                BoxDecoration(
-                                  color:
-                                  previewColor,
-                                  shape:
-                                  BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(
-                                width: 7,
-                              ),
-                              Text(
-                                _displayStatus(
-                                  previewStatus,
-                                ),
-                                style:
-                                TextStyle(
-                                  color:
-                                  previewColor,
-                                  fontSize: 12.5,
-                                  fontWeight:
-                                  FontWeight
-                                      .w800,
-                                ),
-                              ),
-                              const Spacer(),
-                              const Text(
-                                'Auto based on date',
-                                style:
-                                TextStyle(
-                                  color:
-                                  TraceColors
-                                      .textTertiary,
-                                  fontSize: 10,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(
-                          height: 20,
-                        ),
-                        const Text(
-                          'Attendance Schedule',
-                          style: TextStyle(
-                            color:
-                            TraceColors
-                                .textPrimary,
-                            fontSize: 12.5,
-                            fontWeight:
-                            FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(
-                          height: 3,
-                        ),
-                        const Text(
-                          'Set the available Time In and Time Out windows.',
-                          style: TextStyle(
-                            color:
-                            TraceColors
-                                .textTertiary,
-                            fontSize: 9.5,
-                          ),
-                        ),
-                        const SizedBox(
-                          height: 12,
-                        ),
-                        Row(
-                          children: [
-                            Expanded(
-                              child:
-                              _TimeField(
-                                label:
-                                'Time In Start',
-                                value:
-                                timeInStart,
-                                icon:
-                                Icons
-                                    .login_rounded,
-                                onTap:
-                                    () async {
-                                  final picked =
-                                  await _pickTime(
-                                    context,
-                                    timeInStart,
-                                  );
-
-                                  if (picked != null) {
-                                    setDialogState(() {
-                                      timeInStart =
-                                          picked;
-                                    });
-                                  }
-                                },
-                              ),
-                            ),
-                            const SizedBox(
-                              width: 10,
-                            ),
-                            Expanded(
-                              child:
-                              _TimeField(
-                                label:
-                                'Time In End',
-                                value:
-                                timeInEnd,
-                                icon:
-                                Icons
-                                    .schedule_rounded,
-                                onTap:
-                                    () async {
-                                  final picked =
-                                  await _pickTime(
-                                    context,
-                                    timeInEnd,
-                                  );
-
-                                  if (picked != null) {
-                                    setDialogState(() {
-                                      timeInEnd =
-                                          picked;
-                                    });
-                                  }
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(
-                          height: 10,
-                        ),
-                        Row(
-                          children: [
-                            Expanded(
-                              child:
-                              _TimeField(
-                                label:
-                                'Time Out Start',
-                                value:
-                                timeOutStart,
-                                icon:
-                                Icons
-                                    .logout_rounded,
-                                onTap:
-                                    () async {
-                                  final picked =
-                                  await _pickTime(
-                                    context,
-                                    timeOutStart,
-                                  );
-
-                                  if (picked != null) {
-                                    setDialogState(() {
-                                      timeOutStart =
-                                          picked;
-                                    });
-                                  }
-                                },
-                              ),
-                            ),
-                            const SizedBox(
-                              width: 10,
-                            ),
-                            Expanded(
-                              child:
-                              _TimeField(
-                                label:
-                                'Time Out End',
-                                value:
-                                timeOutEnd,
-                                icon:
-                                Icons
-                                    .schedule_rounded,
-                                onTap:
-                                    () async {
-                                  final picked =
-                                  await _pickTime(
-                                    context,
-                                    timeOutEnd,
-                                  );
-
-                                  if (picked != null) {
-                                    setDialogState(() {
-                                      timeOutEnd =
-                                          picked;
-                                    });
-                                  }
-                                },
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(
-                          height: 22,
-                        ),
-                        Row(
-                          mainAxisAlignment:
-                          MainAxisAlignment.end,
-                          children: [
-                            TextButton(
-                              onPressed: () {
-                                Navigator.pop(
-                                  dialogContext,
-                                );
-                              },
-                              child:
-                              const Text(
-                                'Cancel',
-                              ),
-                            ),
-                            const SizedBox(
-                              width: 8,
-                            ),
-                            ElevatedButton.icon(
-                              onPressed:
-                                  () async {
-                                if (!(formKey
-                                    .currentState
-                                    ?.validate() ??
-                                    false)) {
-                                  return;
-                                }
-
-                                final resolvedStatus =
-                                _computeStatus(
-                                  selectedDate,
-                                  existingStatus:
-                                  existingStatus,
-                                );
-
-                                final payload =
-                                <String, dynamic>{
-                                  'eventName':
-                                  eventNameController
-                                      .text
-                                      .trim(),
-                                  'description':
-                                  descriptionController
-                                      .text
-                                      .trim(),
-                                  'venue':
-                                  venueController
-                                      .text
-                                      .trim(),
-                                  'eventDate':
-                                  Timestamp.fromDate(
-                                    selectedDate,
-                                  ),
-                                  'timeInStart':
-                                  _formatTime(
-                                    timeInStart,
-                                  ),
-                                  'timeInEnd':
-                                  _formatTime(
-                                    timeInEnd,
-                                  ),
-                                  'timeOutStart':
-                                  _formatTime(
-                                    timeOutStart,
-                                  ),
-                                  'timeOutEnd':
-                                  _formatTime(
-                                    timeOutEnd,
-                                  ),
-                                  'status':
-                                  resolvedStatus,
-                                  'updatedAt':
-                                  FieldValue
-                                      .serverTimestamp(),
-                                };
-
-                                try {
-                                  final collection =
-                                  FirebaseFirestore
-                                      .instance
-                                      .collection(
-                                    'events',
-                                  );
-
-                                  if (id == null) {
-                                    await collection
-                                        .add({
-                                      ...payload,
-                                      'createdAt':
-                                      FieldValue
-                                          .serverTimestamp(),
-                                    });
-                                  } else {
-                                    await collection
-                                        .doc(id)
-                                        .update(
-                                      payload,
-                                    );
-                                  }
-
-                                  if (!dialogContext
-                                      .mounted) {
-                                    return;
-                                  }
-
-                                  Navigator.pop(
-                                    dialogContext,
-                                  );
-
-                                  if (!mounted) {
-                                    return;
-                                  }
-
-                                  SuperAdminCommon
-                                      .snack(
-                                    context,
-                                    id == null
-                                        ? 'Event created successfully.'
-                                        : 'Event updated successfully.',
-                                  );
-                                } catch (_) {
-                                  if (!dialogContext
-                                      .mounted) {
-                                    return;
-                                  }
-
-                                  SuperAdminCommon
-                                      .snack(
-                                    dialogContext,
-                                    'Unable to save event.',
-                                    error: true,
-                                  );
-                                }
-                              },
-                              icon:
-                              const Icon(
-                                Icons.check_rounded,
-                                size: 17,
-                              ),
-                              label:
-                              Text(
-                                id == null
-                                    ? 'Create Event'
-                                    : 'Save Changes',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    eventNameController.dispose();
-    venueController.dispose();
-    descriptionController.dispose();
-  }
-
-  // ============================================================
-  // TIME PICKER
-  // ============================================================
-
-  Future<TimeOfDay?> _pickTime(
-      BuildContext context,
-      TimeOfDay? initial,
-      ) {
-    return showTimePicker(
-      context: context,
-      initialTime:
-      initial ?? TimeOfDay.now(),
+    if (!mounted || saved != true) return;
+    SuperAdminCommon.snack(
+      context,
+      eventId == null
+          ? 'Event created successfully.'
+          : 'Event updated successfully.',
     );
   }
 
-  // ============================================================
-  // DELETE EVENT
-  // ============================================================
-
-  Future<void> _deleteEvent(
-      String id,
-      String eventName,
-      ) async {
-    final confirmed =
-    await showDialog<bool>(
+  Future<void> _deleteEvent(String id, String eventName) async {
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor:
-          TraceColors.surface,
-          shape:
-          RoundedRectangleBorder(
-            borderRadius:
-            BorderRadius.circular(18),
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: TraceColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text(
+          'Delete Event',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+        ),
+        content: Text(
+          'Are you sure you want to delete "$eventName"?',
+          style: const TextStyle(
+            color: TraceColors.textSecondary,
+            fontSize: 12,
+            height: 1.4,
           ),
-          title:
-          const Text(
-            'Delete Event',
-            style:
-            TextStyle(
-              fontSize: 16,
-              fontWeight:
-              FontWeight.w800,
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
           ),
-          content:
-          Text(
-            'Are you sure you want to delete "$eventName"?',
-            style:
-            const TextStyle(
-              color:
-              TraceColors.textSecondary,
-              fontSize: 12,
-              height: 1.4,
+          ElevatedButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TraceColors.danger,
+              foregroundColor: Colors.white,
+              elevation: 0,
             ),
+            child: const Text('Delete'),
           ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  false,
-                );
-              },
-              child:
-              const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                  true,
-                );
-              },
-              style:
-              ElevatedButton.styleFrom(
-                backgroundColor:
-                TraceColors.danger,
-                foregroundColor:
-                Colors.white,
-                elevation: 0,
-              ),
-              child:
-              const Text('Delete'),
-            ),
-          ],
-        );
-      },
+        ],
+      ),
     );
 
-    if (confirmed != true) {
-      return;
-    }
+    if (confirmed != true || !mounted) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('events')
-          .doc(id)
-          .delete();
-
-      if (!mounted) {
-        return;
-      }
-
+      await FirebaseFirestore.instance.collection('events').doc(id).delete();
+      if (!mounted) return;
+      SuperAdminCommon.snack(context, 'Event deleted successfully.');
+    } catch (error, stackTrace) {
+      debugPrint('Delete event error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
       SuperAdminCommon.snack(
         context,
-        'Event deleted successfully.',
-      );
-    } catch (_) {
-      if (!mounted) {
-        return;
-      }
-
-      SuperAdminCommon.snack(
-        context,
-        'Unable to delete event.',
+        'Unable to delete event. Please try again.',
         error: true,
       );
     }
   }
 
-  // ============================================================
-  // BUILD
-  // ============================================================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-      TraceColors.canvas,
-      body:
-      SafeArea(
-        child:
-        StreamBuilder<
-            QuerySnapshot<
-                Map<String, dynamic>>>(
-          stream:
-          _eventsStream,
-          builder: (
-              context,
-              snapshot,
-              ) {
-            // ==================================================
-            // INITIAL LOADING ONLY
-            // ==================================================
-
-            if (snapshot.connectionState ==
-                ConnectionState.waiting &&
+      backgroundColor: TraceColors.canvas,
+      body: SafeArea(
+        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: _eventsStream,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
                 !snapshot.hasData) {
               return SuperAdminCommon.loading();
             }
 
-            // ==================================================
-            // ERROR
-            // ==================================================
-
             if (snapshot.hasError) {
-              return _ErrorState(
+              return _EventsErrorState(
                 onRetry: () {
-                  setState(() {});
+                  setState(_createEventsStream);
                 },
               );
             }
 
-            final docs =
-                snapshot.data?.docs ??
-                    [];
+            final docs = (snapshot.data?.docs ?? []).toList();
+            docs.sort((a, b) {
+              final first = _parseEventDate(a.data());
+              final second = _parseEventDate(b.data());
+              if (first == null && second == null) return 0;
+              if (first == null) return 1;
+              if (second == null) return -1;
+              return second.compareTo(first);
+            });
 
-            // ==================================================
-            // LOCAL SEARCH
-            // ==================================================
-
-            final filteredDocs =
-            docs.where(
-                  (doc) {
-                final data =
-                doc.data();
-
-                final eventName =
-                SuperAdminCommon
-                    .text(
-                  data,
-                  ['eventName'],
-                ).trim().toLowerCase();
-
-                return _searchQuery.isEmpty ||
-                    eventName.contains(
-                      _searchQuery,
-                    );
-              },
-            ).toList();
-
-            // ==================================================
-            // STATS
-            // ==================================================
-
-            final total =
-                docs.length;
+            final filteredDocs = docs.where((doc) {
+              final data = doc.data();
+              final name = _readText(data, const ['eventName', 'name', 'title'])
+                  .toLowerCase();
+              final venue = _readText(data, const ['venue', 'location'])
+                  .toLowerCase();
+              return _searchQuery.isEmpty ||
+                  name.contains(_searchQuery) ||
+                  venue.contains(_searchQuery);
+            }).toList();
 
             int upcoming = 0;
             int ongoing = 0;
             int completed = 0;
+            int cancelled = 0;
 
             for (final doc in docs) {
-              final data =
-              doc.data();
-
-              final event =
-              EventModel.fromFirestore(
-                doc,
+              final status = _computeEventStatus(
+                _parseEventDate(doc.data()),
+                existingStatus: _readText(doc.data(), const ['status']),
               );
-
-              final rawStatus =
-              SuperAdminCommon
-                  .text(
-                data,
-                ['status'],
-              );
-
-              final status =
-              _computeStatus(
-                event.eventDate,
-                existingStatus:
-                rawStatus,
-              );
-
               switch (status) {
                 case 'upcoming':
                   upcoming++;
@@ -1233,172 +202,69 @@ class _SuperAdminEventsScreenState
                   completed++;
                   break;
                 case 'cancelled':
+                  cancelled++;
                   break;
               }
             }
 
-            // ==================================================
-            // PAGINATION
-            //
-            // EXACTLY 7 EVENTS PER PAGE
-            // ==================================================
-
-            final totalPages =
-            filteredDocs.isEmpty
+            final totalPages = filteredDocs.isEmpty
                 ? 1
-                : (filteredDocs.length /
-                _pageSize)
-                .ceil();
-
-            final maxPage =
-                totalPages - 1;
-
-            final safePage =
-            _currentPage.clamp(
-              0,
-              maxPage,
-            );
-
-            final startIndex =
-                safePage * _pageSize;
-
-            final pagedDocs =
-            filteredDocs
-                .skip(
-              startIndex,
-            )
-                .take(
-              _pageSize,
-            )
+                : (filteredDocs.length / _pageSize).ceil();
+            final safePage = _currentPage.clamp(0, totalPages - 1);
+            final pagedDocs = filteredDocs
+                .skip(safePage * _pageSize)
+                .take(_pageSize)
                 .toList();
 
-            final isFirstPage =
-                safePage == 0;
-
-            final isLastPage =
-                safePage >= maxPage;
-
-            // ==================================================
-            // PAGE
-            // ==================================================
-
             return LayoutBuilder(
-              builder: (
-                  context,
-                  constraints,
-                  ) {
-                final width =
-                    constraints.maxWidth;
-
-                final isMobile =
-                    width < 650;
-
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 650;
                 return SingleChildScrollView(
-                  physics:
-                  const BouncingScrollPhysics(),
-                  padding:
-                  EdgeInsets.fromLTRB(
+                  physics: const BouncingScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
                     isMobile ? 16 : 28,
                     isMobile ? 20 : 28,
                     isMobile ? 16 : 28,
                     32,
                   ),
-                  child:
-                  Center(
-                    child:
-                    ConstrainedBox(
-                      constraints:
-                      const BoxConstraints(
-                        maxWidth: 1440,
-                      ),
-                      child:
-                      Column(
-                        crossAxisAlignment:
-                        CrossAxisAlignment
-                            .stretch,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1440),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          _PageHeader(
-                            onAdd:
-                            _showEventDialog,
+                          _EventsPageHeader(onAdd: () => _openEventForm()),
+                          const SizedBox(height: 22),
+                          _EventStats(
+                            total: docs.length,
+                            upcoming: upcoming,
+                            ongoing: ongoing,
+                            completed: completed,
+                            cancelled: cancelled,
+                            width: constraints.maxWidth,
                           ),
-                          const SizedBox(
-                            height: 22,
-                          ),
-                          _stats(
-                            total,
-                            upcoming,
-                            ongoing,
-                            completed,
-                            width,
-                          ),
-                          const SizedBox(
-                            height: 20,
-                          ),
-                          _EventsSection(
-                            filteredCount:
-                            filteredDocs
-                                .length,
-                            totalCount:
-                            total,
-                            searchController:
-                            _searchController,
-                            searchQuery:
-                            _searchQuery,
-                            events:
-                            pagedDocs,
-                            totalPages:
-                            totalPages,
-                            currentPage:
-                            safePage,
-                            onSearchChanged:
-                            _onSearchChanged,
-                            onClearSearch:
-                            _clearSearch,
-                            onPreviousPage:
-                            isFirstPage
+                          const SizedBox(height: 20),
+                          _EventsListSection(
+                            filteredCount: filteredDocs.length,
+                            totalCount: docs.length,
+                            searchController: _searchController,
+                            searchQuery: _searchQuery,
+                            events: pagedDocs,
+                            totalPages: totalPages,
+                            currentPage: safePage,
+                            onSearchChanged: _onSearchChanged,
+                            onClearSearch: _clearSearch,
+                            onPreviousPage: safePage <= 0
                                 ? null
-                                : () {
-                              setState(() {
-                                _currentPage =
-                                    safePage -
-                                        1;
-                              });
-                            },
-                            onNextPage:
-                            isLastPage
+                                : () => setState(() => _currentPage = safePage - 1),
+                            onNextPage: safePage >= totalPages - 1
                                 ? null
-                                : () {
-                              setState(() {
-                                _currentPage =
-                                    safePage +
-                                        1;
-                              });
-                            },
-                            onEdit:
-                                (doc) {
-                              _showEventDialog(
-                                id:
-                                doc.id,
-                                data:
-                                doc.data(),
-                              );
-                            },
-                            onDelete:
-                                (
-                                id,
-                                name,
-                                ) {
-                              _deleteEvent(
-                                id,
-                                name,
-                              );
-                            },
-                            computeStatus:
-                            _computeStatus,
-                            displayStatus:
-                            _displayStatus,
-                            statusColor:
-                            _statusColor,
+                                : () => setState(() => _currentPage = safePage + 1),
+                            onEdit: (doc) => _openEventForm(
+                              eventId: doc.id,
+                              data: doc.data(),
+                            ),
+                            onDelete: _deleteEvent,
                           ),
                         ],
                       ),
@@ -1414,18 +280,721 @@ class _SuperAdminEventsScreenState
   }
 }
 
-// ================================================================
-// STAT CARD
-// ================================================================
+// ============================================================================
+// ADD / EDIT EVENT FORM - STYLED TO MATCH AddEventScreen
+// ============================================================================
 
-class _StatCard
-    extends StatelessWidget {
+class _SuperAdminEventFormPage extends StatefulWidget {
+  final String? eventId;
+  final Map<String, dynamic>? initialData;
+
+  const _SuperAdminEventFormPage({
+    required this.eventId,
+    required this.initialData,
+  });
+
+  @override
+  State<_SuperAdminEventFormPage> createState() =>
+      _SuperAdminEventFormPageState();
+}
+
+class _SuperAdminEventFormPageState extends State<_SuperAdminEventFormPage> {
+  static const String _cloudinaryCloudName = 'pgglswi6';
+  static const String _cloudinaryUploadPreset = 'trace_event_images';
+
+  static const Color _navy = Color(0xFF071936);
+  static const Color _accentBlue = Color(0xFF4A90E2);
+  static const Color _accentGreen = Color(0xFF20A96B);
+  static const Color _textPrimary = Color(0xFF1B2432);
+  static const Color _textSecondary = Color(0xFF8A93A3);
+  static const Color _fieldFill = Color(0xFFF7F9FC);
+  static const Color _cardBorder = Color(0xFFE5E9F0);
+
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _venueController;
+
+  DateTime? _eventDate;
+  TimeOfDay? _timeInStart;
+  TimeOfDay? _timeInEnd;
+  TimeOfDay? _timeOutStart;
+  TimeOfDay? _timeOutEnd;
+
+  bool _isSaving = false;
+  bool _isUploadingImage = false;
+  bool _editingTimeSchedule = false;
+
+  File? _pickedImage;
+  String? _uploadedImageUrl;
+  String _existingStatus = '';
+
+  bool get _isEditing => widget.eventId != null;
+  bool get _isBusy => _isSaving || _isUploadingImage;
+
+  @override
+  void initState() {
+    super.initState();
+    final data = widget.initialData ?? <String, dynamic>{};
+    _nameController = TextEditingController(
+      text: _readText(data, const ['eventName', 'name', 'title']),
+    );
+    _descriptionController = TextEditingController(
+      text: _readText(data, const ['description']),
+    );
+    _venueController = TextEditingController(
+      text: _readText(data, const ['venue', 'location', 'eventVenue']),
+    );
+    _eventDate = _parseEventDate(data);
+    _timeInStart = _parseTime(_readText(data, const ['timeInStart']));
+    _timeInEnd = _parseTime(_readText(data, const ['timeInEnd']));
+    _timeOutStart = _parseTime(_readText(data, const ['timeOutStart']));
+    _timeOutEnd = _parseTime(_readText(data, const ['timeOutEnd']));
+    _uploadedImageUrl = _readText(data, const ['eventImage', 'imageUrl', 'imageURL']);
+    _existingStatus = _readText(data, const ['status']);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _venueController.dispose();
+    super.dispose();
+  }
+
+  DateTime _nowManila() =>
+      DateTime.now().toUtc().add(const Duration(hours: 8));
+
+  String _computeStatus(DateTime date) => _computeEventStatus(
+    date,
+    existingStatus: _existingStatus,
+  );
+
+  String _formatTime(TimeOfDay? time) {
+    if (time == null) return '--:--';
+    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.period == DayPeriod.am ? 'AM' : 'PM';
+    return '$hour:$minute $period';
+  }
+
+  String _formatDate(DateTime date) => DateFormat('MMM d, yyyy').format(date);
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final selected = _eventDate ?? now;
+    final firstDate = DateTime(2020);
+    final lastDate = DateTime(now.year + 10, 12, 31);
+    final initialDate = selected.isBefore(firstDate)
+        ? firstDate
+        : selected.isAfter(lastDate)
+        ? lastDate
+        : selected;
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: _accentBlue),
+        ),
+        child: child ?? const SizedBox.shrink(),
+      ),
+    );
+
+    if (picked != null && mounted) {
+      setState(() => _eventDate = picked);
+    }
+  }
+
+  Future<void> _pickTime(
+      void Function(TimeOfDay value) assign,
+      TimeOfDay? initial,
+      ) async {
+    if (!_editingTimeSchedule || _isBusy) return;
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial ?? TimeOfDay.now(),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: _accentBlue),
+        ),
+        child: child ?? const SizedBox.shrink(),
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(() => assign(picked));
+    }
+  }
+
+  Future<void> _pickImage() async {
+    if (_isBusy) return;
+    try {
+      final file = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80,
+      );
+      if (file == null || !mounted) return;
+      setState(() {
+        _pickedImage = File(file.path);
+        _uploadedImageUrl = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack('Unable to pick image: $error', error: true);
+    }
+  }
+
+  Future<String?> _uploadImageIfNeeded() async {
+    if (_pickedImage == null) return _uploadedImageUrl;
+
+    setState(() => _isUploadingImage = true);
+    try {
+      final uploadUri = Uri.parse(
+        'https://api.cloudinary.com/v1_1/$_cloudinaryCloudName/image/upload',
+      );
+      final request = http.MultipartRequest('POST', uploadUri)
+        ..fields['upload_preset'] = _cloudinaryUploadPreset
+        ..files.add(await http.MultipartFile.fromPath('file', _pickedImage!.path));
+
+      final response = await request.send().timeout(const Duration(seconds: 60));
+      final responseBody = await response.stream.bytesToString();
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final decoded = jsonDecode(responseBody);
+        if (decoded is Map<String, dynamic>) {
+          final url = decoded['secure_url']?.toString();
+          if (url != null && url.isNotEmpty) {
+            _uploadedImageUrl = url;
+            return url;
+          }
+        }
+        throw Exception('Cloudinary did not return a secure image URL.');
+      }
+
+      var message = responseBody;
+      try {
+        final decoded = jsonDecode(responseBody);
+        if (decoded is Map<String, dynamic> && decoded['error'] is Map) {
+          message = (decoded['error'] as Map)['message']?.toString() ?? responseBody;
+        }
+      } catch (_) {
+        // Retain the raw response when it is not JSON.
+      }
+      throw Exception('Cloudinary upload failed (${response.statusCode}): $message');
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
+    }
+  }
+
+  Future<void> _saveEvent() async {
+    if (_isBusy) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    if (_eventDate == null) {
+      _showSnack('Please select an event date.', error: true);
+      return;
+    }
+
+    setState(() => _isSaving = true);
+    try {
+      final imageUrl = await _uploadImageIfNeeded();
+      if (!mounted) return;
+
+      final payload = <String, dynamic>{
+        'eventName': _nameController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'venue': _venueController.text.trim(),
+        'eventDate': Timestamp.fromDate(_eventDate!),
+        'eventImage': imageUrl ?? '',
+        'timeInStart': _formatTime(_timeInStart) == '--:--' ? '' : _formatTime(_timeInStart),
+        'timeInEnd': _formatTime(_timeInEnd) == '--:--' ? '' : _formatTime(_timeInEnd),
+        'timeOutStart': _formatTime(_timeOutStart) == '--:--' ? '' : _formatTime(_timeOutStart),
+        'timeOutEnd': _formatTime(_timeOutEnd) == '--:--' ? '' : _formatTime(_timeOutEnd),
+        'status': _computeStatus(_eventDate!),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      final collection = FirebaseFirestore.instance.collection('events');
+      if (_isEditing) {
+        await collection.doc(widget.eventId).update(payload);
+      } else {
+        await collection.add({
+          ...payload,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error, stackTrace) {
+      debugPrint('Save event error: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      _showSnack('Unable to save event: $error', error: true);
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  void _showSnack(String message, {bool error = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: error ? Colors.redAccent : _accentGreen,
+          content: Text(message),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.white,
+        iconTheme: const IconThemeData(color: _textPrimary),
+        title: Text(
+          _isEditing ? 'Edit Event' : 'Create Event',
+          style: const TextStyle(
+            color: _textPrimary,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        centerTitle: true,
+      ),
+      body: SafeArea(
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 30),
+            children: [
+              _imageUploadBox(),
+              const SizedBox(height: 22),
+              _fieldLabel('Event Name'),
+              _textField(
+                controller: _nameController,
+                hint: 'Enter event name',
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter an event name'
+                    : null,
+              ),
+              const SizedBox(height: 18),
+              _fieldLabel('Date'),
+              _pickerTile(
+                icon: Icons.calendar_today_rounded,
+                label: _eventDate == null ? 'Select date' : _formatDate(_eventDate!),
+                filled: _eventDate != null,
+                onTap: _pickDate,
+              ),
+              const SizedBox(height: 18),
+              _timeScheduleBox(),
+              const SizedBox(height: 18),
+              _fieldLabel('Location'),
+              _textField(
+                controller: _venueController,
+                hint: 'Enter location',
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter a venue'
+                    : null,
+              ),
+              const SizedBox(height: 18),
+              _fieldLabel('Description'),
+              _textField(
+                controller: _descriptionController,
+                hint: 'Enter description',
+                maxLines: 3,
+              ),
+              const SizedBox(height: 28),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _isBusy ? null : _saveEvent,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _navy,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: _navy.withValues(alpha: 0.65),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  child: _isBusy
+                      ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(
+                        width: 21,
+                        height: 21,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(_isUploadingImage ? 'Uploading image...' : 'Saving event...'),
+                    ],
+                  )
+                      : Text(_isEditing ? 'Save Changes' : 'Create Event'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _imageUploadBox() {
+    final hasPickedImage = _pickedImage != null;
+    final imageUrl = _uploadedImageUrl;
+    return InkWell(
+      onTap: _isBusy ? null : _pickImage,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: double.infinity,
+        height: 165,
+        decoration: BoxDecoration(
+          color: _navy,
+          borderRadius: BorderRadius.circular(16),
+          image: hasPickedImage
+              ? DecorationImage(image: FileImage(_pickedImage!), fit: BoxFit.cover)
+              : imageUrl != null && imageUrl.isNotEmpty
+              ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
+              : null,
+        ),
+        child: hasPickedImage || (imageUrl != null && imageUrl.isNotEmpty)
+            ? Align(
+          alignment: Alignment.bottomRight,
+          child: Container(
+            margin: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(7),
+            decoration: const BoxDecoration(
+              color: Colors.black54,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.edit, color: Colors.white, size: 18),
+          ),
+        )
+            : const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.camera_alt_outlined, color: Colors.white, size: 30),
+              SizedBox(height: 8),
+              Text(
+                'Upload Event Image',
+                style: TextStyle(color: Colors.white, fontSize: 13.5),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _timeScheduleBox() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _editingTimeSchedule ? _accentGreen : _cardBorder,
+          width: _editingTimeSchedule ? 1.4 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Time Schedule',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.bold,
+                  color: _textPrimary,
+                ),
+              ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: _isBusy
+                    ? null
+                    : () => setState(() => _editingTimeSchedule = !_editingTimeSchedule),
+                child: Text(
+                  _editingTimeSchedule ? '(Done)' : '(Edit)',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: _accentGreen,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _timeTile(
+                  label: 'Morning Time In',
+                  value: _formatTime(_timeInStart),
+                  onTap: () => _pickTime((v) => _timeInStart = v, _timeInStart),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _timeTile(
+                  label: 'Morning Time Out',
+                  value: _formatTime(_timeInEnd),
+                  onTap: () => _pickTime((v) => _timeInEnd = v, _timeInEnd),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _timeTile(
+                  label: 'Afternoon Time In',
+                  value: _formatTime(_timeOutStart),
+                  onTap: () => _pickTime((v) => _timeOutStart = v, _timeOutStart),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _timeTile(
+                  label: 'Afternoon Time Out',
+                  value: _formatTime(_timeOutEnd),
+                  onTap: () => _pickTime((v) => _timeOutEnd = v, _timeOutEnd),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _timeTile({
+    required String label,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: _editingTimeSchedule ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+        decoration: BoxDecoration(
+          color: _editingTimeSchedule ? const Color(0xFFEFFAF3) : _fieldFill,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 10.5,
+                color: _textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: _editingTimeSchedule ? _accentGreen : _textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _fieldLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: _textPrimary,
+      ),
+    ),
+  );
+
+  InputDecoration _fieldDecoration({required String hint}) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(color: _textSecondary, fontSize: 13.5),
+    filled: true,
+    fillColor: _fieldFill,
+    contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide.none,
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: _accentBlue, width: 2),
+    ),
+    errorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: Colors.red, width: 1.5),
+    ),
+    focusedErrorBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: Colors.red, width: 1.5),
+    ),
+  );
+
+  Widget _textField({
+    required TextEditingController controller,
+    required String hint,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+  }) {
+    return TextFormField(
+      controller: controller,
+      validator: validator,
+      maxLines: maxLines,
+      enabled: !_isBusy,
+      textCapitalization: TextCapitalization.sentences,
+      style: const TextStyle(color: _textPrimary, fontSize: 14),
+      decoration: _fieldDecoration(hint: hint),
+    );
+  }
+
+  Widget _pickerTile({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool filled = false,
+  }) {
+    return InkWell(
+      onTap: _isBusy ? null : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 14),
+        decoration: BoxDecoration(
+          color: _fieldFill,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: _textSecondary, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: filled ? _textPrimary : _textSecondary,
+                  fontSize: 13.5,
+                  fontWeight: filled ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+            const Icon(Icons.keyboard_arrow_down_rounded, color: _textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// EVENT STATS / HEADER / LIST
+// ============================================================================
+
+class _EventStats extends StatelessWidget {
+  final int total;
+  final int upcoming;
+  final int ongoing;
+  final int completed;
+  final int cancelled;
+  final double width;
+
+  const _EventStats({
+    required this.total,
+    required this.upcoming,
+    required this.ongoing,
+    required this.completed,
+    required this.cancelled,
+    required this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = [
+      _EventStatCard(title: 'Total', value: '$total', icon: Icons.event_rounded, accent: TraceColors.accent),
+      _EventStatCard(title: 'Upcoming', value: '$upcoming', icon: Icons.upcoming_rounded, accent: const Color(0xFF2563EB)),
+      _EventStatCard(title: 'Ongoing', value: '$ongoing', icon: Icons.play_circle_outline_rounded, accent: TraceColors.warning),
+      _EventStatCard(title: 'Completed', value: '$completed', icon: Icons.check_circle_outline_rounded, accent: TraceColors.success),
+    ];
+
+    if (width < 650) {
+      return Column(
+        children: [
+          Row(children: [Expanded(child: cards[0]), const SizedBox(width: 10), Expanded(child: cards[1])]),
+          const SizedBox(height: 10),
+          Row(children: [Expanded(child: cards[2]), const SizedBox(width: 10), Expanded(child: cards[3])]),
+          if (cancelled > 0) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Cancelled: $cancelled', style: const TextStyle(color: TraceColors.textTertiary, fontSize: 10)),
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Row(
+      children: [
+        Expanded(child: cards[0]),
+        const SizedBox(width: 12),
+        Expanded(child: cards[1]),
+        const SizedBox(width: 12),
+        Expanded(child: cards[2]),
+        const SizedBox(width: 12),
+        Expanded(child: cards[3]),
+      ],
+    );
+  }
+}
+
+class _EventStatCard extends StatelessWidget {
   final String title;
   final String value;
   final IconData icon;
   final Color accent;
 
-  const _StatCard({
+  const _EventStatCard({
     required this.title,
     required this.value,
     required this.icon,
@@ -1435,89 +1004,35 @@ class _StatCard
   @override
   Widget build(BuildContext context) {
     return Container(
-      width:
-      double.infinity,
-      constraints:
-      const BoxConstraints(
-        minHeight: 104,
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 92),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: TraceColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TraceColors.border),
       ),
-      padding:
-      const EdgeInsets.all(14),
-      decoration:
-      BoxDecoration(
-        color:
-        TraceColors.surface,
-        borderRadius:
-        BorderRadius.circular(16),
-        border:
-        Border.all(
-          color:
-          TraceColors.border,
-        ),
-      ),
-      child:
-      Row(
+      child: Row(
         children: [
           Container(
-            width: 42,
-            height: 42,
-            alignment:
-            Alignment.center,
-            decoration:
-            BoxDecoration(
-              color:
-              accent.withValues(
-                alpha: 0.10,
-              ),
-              borderRadius:
-              BorderRadius.circular(12),
+            width: 40,
+            height: 40,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
             ),
-            child:
-            Icon(
-              icon,
-              color:
-              accent,
-              size: 20,
-            ),
+            child: Icon(icon, color: accent, size: 20),
           ),
-          const SizedBox(
-            width: 10,
-          ),
+          const SizedBox(width: 10),
           Expanded(
-            child:
-            Column(
-              mainAxisAlignment:
-              MainAxisAlignment.center,
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style:
-                  const TextStyle(
-                    color:
-                    TraceColors
-                        .textTertiary,
-                    fontSize: 9.5,
-                    fontWeight:
-                    FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(
-                  height: 3,
-                ),
-                Text(
-                  value,
-                  style:
-                  const TextStyle(
-                    color:
-                    TraceColors
-                        .textPrimary,
-                    fontSize: 21,
-                    fontWeight:
-                    FontWeight.w800,
-                  ),
-                ),
+                Text(title, style: const TextStyle(color: TraceColors.textTertiary, fontSize: 9.5, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 3),
+                Text(value, style: const TextStyle(color: TraceColors.textPrimary, fontSize: 21, fontWeight: FontWeight.w800)),
               ],
             ),
           ),
@@ -1527,193 +1042,82 @@ class _StatCard
   }
 }
 
-// ================================================================
-// PAGE HEADER
-// ================================================================
-
-class _PageHeader
-    extends StatelessWidget {
+class _EventsPageHeader extends StatelessWidget {
   final VoidCallback onAdd;
-
-  const _PageHeader({
-    required this.onAdd,
-  });
+  const _EventsPageHeader({required this.onAdd});
 
   @override
   Widget build(BuildContext context) {
+    final mobile = MediaQuery.sizeOf(context).width < 430;
     return Row(
-      crossAxisAlignment:
-      CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
           width: 44,
           height: 44,
-          alignment:
-          Alignment.center,
-          decoration:
-          BoxDecoration(
-            color:
-            TraceColors.accentSoft,
-            borderRadius:
-            BorderRadius.circular(13),
-          ),
-          child:
-          const Icon(
-            Icons.event_rounded,
-            color:
-            TraceColors.accent,
-            size: 21,
-          ),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: TraceColors.accentSoft, borderRadius: BorderRadius.circular(13)),
+          child: const Icon(Icons.event_rounded, color: TraceColors.accent, size: 21),
         ),
-        const SizedBox(
-          width: 13,
-        ),
+        const SizedBox(width: 13),
         Expanded(
-          child:
-          Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.start,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Events',
-                style:
-                TextStyle(
-                  color:
-                  TraceColors
-                      .textPrimary,
-                  fontSize: 25,
-                  fontWeight:
-                  FontWeight.w800,
-                  letterSpacing:
-                  -0.5,
-                ),
-              ),
-              const SizedBox(
-                height: 5,
-              ),
-              const Text(
+              const Text('Events', style: TextStyle(color: TraceColors.textPrimary, fontSize: 25, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+              const SizedBox(height: 5),
+              Text(
                 'Manage school events, schedules, and attendance windows.',
                 maxLines: 2,
-                overflow:
-                TextOverflow.ellipsis,
-                style:
-                TextStyle(
-                  color:
-                  TraceColors
-                      .textSecondary,
-                  fontSize: 11.5,
-                  height: 1.4,
-                ),
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: TraceColors.textSecondary, fontSize: 11.5, height: 1.4),
               ),
             ],
           ),
         ),
-        const SizedBox(
-          width: 12,
-        ),
-        ElevatedButton.icon(
-          onPressed:
-          onAdd,
-          icon:
-          const Icon(
-            Icons.add_rounded,
-            size: 17,
-          ),
-          label:
-          const Text(
-            'Add Event',
-          ),
-          style:
-          ElevatedButton.styleFrom(
-            backgroundColor:
-            TraceColors.accent,
-            foregroundColor:
-            TraceColors.ink,
-            elevation:
-            0,
-            padding:
-            const EdgeInsets
-                .symmetric(
-              horizontal: 14,
-              vertical: 12,
-            ),
-            textStyle:
-            const TextStyle(
-              fontSize: 11.5,
-              fontWeight:
-              FontWeight.w800,
-            ),
-            shape:
-            RoundedRectangleBorder(
-              borderRadius:
-              BorderRadius.circular(
-                11,
-              ),
+        const SizedBox(width: 10),
+        if (mobile)
+          IconButton.filled(
+            tooltip: 'Add Event',
+            onPressed: onAdd,
+            style: IconButton.styleFrom(backgroundColor: TraceColors.accent, foregroundColor: TraceColors.ink),
+            icon: const Icon(Icons.add_rounded),
+          )
+        else
+          ElevatedButton.icon(
+            onPressed: onAdd,
+            icon: const Icon(Icons.add_rounded, size: 17),
+            label: const Text('Add Event'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TraceColors.accent,
+              foregroundColor: TraceColors.ink,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
             ),
           ),
-        ),
       ],
     );
   }
 }
 
-// ================================================================
-// EVENTS SECTION
-// ================================================================
-
-class _EventsSection
-    extends StatelessWidget {
+class _EventsListSection extends StatelessWidget {
   final int filteredCount;
   final int totalCount;
-
-  final TextEditingController
-  searchController;
-
+  final TextEditingController searchController;
   final String searchQuery;
-
-  final List<
-      QueryDocumentSnapshot<
-          Map<String, dynamic>>> events;
-
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> events;
   final int totalPages;
   final int currentPage;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
+  final VoidCallback? onPreviousPage;
+  final VoidCallback? onNextPage;
+  final void Function(QueryDocumentSnapshot<Map<String, dynamic>>) onEdit;
+  final void Function(String id, String name) onDelete;
 
-  final ValueChanged<String>
-  onSearchChanged;
-
-  final VoidCallback
-  onClearSearch;
-
-  final VoidCallback?
-  onPreviousPage;
-
-  final VoidCallback?
-  onNextPage;
-
-  final void Function(
-      QueryDocumentSnapshot<
-          Map<String, dynamic>>)
-  onEdit;
-
-  final void Function(
-      String id,
-      String name,
-      ) onDelete;
-
-  final String Function(
-      DateTime, {
-      String? existingStatus,
-      }) computeStatus;
-
-  final String Function(
-      String,
-      ) displayStatus;
-
-  final Color Function(
-      String,
-      ) statusColor;
-
-  const _EventsSection({
+  const _EventsListSection({
     required this.filteredCount,
     required this.totalCount,
     required this.searchController,
@@ -1727,300 +1131,107 @@ class _EventsSection
     required this.onNextPage,
     required this.onEdit,
     required this.onDelete,
-    required this.computeStatus,
-    required this.displayStatus,
-    required this.statusColor,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width:
-      double.infinity,
-      decoration:
-      BoxDecoration(
-        color:
-        TraceColors.surface,
-        borderRadius:
-        BorderRadius.circular(19),
-        border:
-        Border.all(
-          color:
-          TraceColors.border,
-        ),
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: TraceColors.surface,
+        borderRadius: BorderRadius.circular(19),
+        border: Border.all(color: TraceColors.border),
       ),
-      child:
-      Padding(
-        padding:
-        const EdgeInsets.all(18),
-        child:
-        Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.stretch,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
               children: [
                 Container(
                   width: 38,
                   height: 38,
-                  alignment:
-                  Alignment.center,
-                  decoration:
-                  BoxDecoration(
-                    color:
-                    TraceColors
-                        .accentSoft,
-                    borderRadius:
-                    BorderRadius.circular(
-                      11,
-                    ),
-                  ),
-                  child:
-                  const Icon(
-                    Icons
-                        .calendar_month_rounded,
-                    color:
-                    TraceColors.accent,
-                    size: 18,
-                  ),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(color: TraceColors.accentSoft, borderRadius: BorderRadius.circular(11)),
+                  child: const Icon(Icons.calendar_month_rounded, color: TraceColors.accent, size: 18),
                 ),
-                const SizedBox(
-                  width: 11,
-                ),
+                const SizedBox(width: 11),
                 Expanded(
-                  child:
-                  Column(
-                    crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'Event Management',
-                        style:
-                        TextStyle(
-                          color:
-                          TraceColors
-                              .textPrimary,
-                          fontSize: 13.5,
-                          fontWeight:
-                          FontWeight.w800,
-                        ),
-                      ),
-                      const SizedBox(
-                        height: 3,
-                      ),
-                      Text(
-                        '$filteredCount of $totalCount events shown',
-                        style:
-                        const TextStyle(
-                          color:
-                          TraceColors
-                              .textTertiary,
-                          fontSize: 9.5,
-                        ),
-                      ),
+                      const Text('Event Management', style: TextStyle(color: TraceColors.textPrimary, fontSize: 13.5, fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 3),
+                      Text('$filteredCount of $totalCount events shown', style: const TextStyle(color: TraceColors.textTertiary, fontSize: 9.5)),
                     ],
                   ),
                 ),
               ],
             ),
-            const SizedBox(
-              height: 16,
-            ),
+            const SizedBox(height: 16),
             TextField(
-              controller:
-              searchController,
-              onChanged:
-              onSearchChanged,
-              decoration:
-              InputDecoration(
+              controller: searchController,
+              onChanged: onSearchChanged,
+              decoration: InputDecoration(
                 isDense: true,
-                hintText:
-                'Search event name...',
-                hintStyle:
-                const TextStyle(
-                  color:
-                  TraceColors
-                      .textTertiary,
-                  fontSize: 11.5,
-                ),
-                prefixIcon:
-                const Icon(
-                  Icons.search_rounded,
-                  size: 18,
-                  color:
-                  TraceColors
-                      .textTertiary,
-                ),
-                suffixIcon:
-                searchQuery.isNotEmpty
+                hintText: 'Search event name or location...',
+                hintStyle: const TextStyle(color: TraceColors.textTertiary, fontSize: 11.5),
+                prefixIcon: const Icon(Icons.search_rounded, size: 18, color: TraceColors.textTertiary),
+                suffixIcon: searchQuery.isNotEmpty
                     ? IconButton(
-                  tooltip:
-                  'Clear search',
-                  onPressed:
-                  onClearSearch,
-                  icon:
-                  const Icon(
-                    Icons
-                        .close_rounded,
-                    size: 17,
-                    color:
-                    TraceColors
-                        .textTertiary,
-                  ),
+                  tooltip: 'Clear search',
+                  onPressed: onClearSearch,
+                  icon: const Icon(Icons.close_rounded, size: 17, color: TraceColors.textTertiary),
                 )
                     : null,
                 filled: true,
-                fillColor:
-                TraceColors.canvas,
-                contentPadding:
-                const EdgeInsets
-                    .symmetric(
-                  horizontal: 12,
-                  vertical: 13,
-                ),
-                border:
-                OutlineInputBorder(
-                  borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
-                  borderSide:
-                  BorderSide.none,
-                ),
-                enabledBorder:
-                OutlineInputBorder(
-                  borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
-                  borderSide:
-                  BorderSide.none,
-                ),
-                focusedBorder:
-                OutlineInputBorder(
-                  borderRadius:
-                  BorderRadius.circular(
-                    12,
-                  ),
-                  borderSide:
-                  const BorderSide(
-                    color:
-                    TraceColors
-                        .accent,
-                    width: 1.1,
-                  ),
+                fillColor: TraceColors.canvas,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: TraceColors.accent, width: 1.1),
                 ),
               ),
             ),
-            const SizedBox(
-              height: 14,
-            ),
-            const Divider(
-              height: 1,
-              color:
-              TraceColors.border,
-            ),
-            const SizedBox(
-              height: 16,
-            ),
+            const SizedBox(height: 14),
+            const Divider(height: 1, color: TraceColors.border),
+            const SizedBox(height: 16),
             if (events.isEmpty)
               SizedBox(
                 height: 220,
-                child:
-                SuperAdminCommon.empty(
-                  searchQuery.isNotEmpty
-                      ? 'No events match your search.'
-                      : 'No events found.',
-                  icon:
-                  Icons
-                      .event_busy_rounded,
+                child: SuperAdminCommon.empty(
+                  searchQuery.isNotEmpty ? 'No events match your search.' : 'No events found.',
+                  icon: Icons.event_busy_rounded,
                 ),
               )
             else
               ListView.separated(
-                shrinkWrap:
-                true,
-                physics:
-                const NeverScrollableScrollPhysics(),
-                itemCount:
-                events.length,
-                separatorBuilder:
-                    (
-                    context,
-                    index,
-                    ) =>
-                const SizedBox(
-                  height: 10,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: events.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                itemBuilder: (context, index) => _EventCard(
+                  doc: events[index],
+                  onEdit: onEdit,
+                  onDelete: onDelete,
                 ),
-                itemBuilder:
-                    (
-                    context,
-                    index,
-                    ) {
-                  return _EventCard(
-                    doc:
-                    events[index],
-                    onEdit:
-                    onEdit,
-                    onDelete:
-                    onDelete,
-                    computeStatus:
-                    computeStatus,
-                    displayStatus:
-                    displayStatus,
-                    statusColor:
-                    statusColor,
-                  );
-                },
               ),
             if (totalPages > 1) ...[
-              const SizedBox(
-                height: 16,
-              ),
-              const Divider(
-                height: 1,
-                color:
-                TraceColors.border,
-              ),
-              const SizedBox(
-                height: 13,
-              ),
+              const SizedBox(height: 16),
+              const Divider(height: 1, color: TraceColors.border),
+              const SizedBox(height: 13),
               Row(
-                mainAxisAlignment:
-                MainAxisAlignment
-                    .spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Page ${currentPage + 1} of $totalPages',
-                    style:
-                    const TextStyle(
-                      color:
-                      TraceColors
-                          .textTertiary,
-                      fontSize: 10,
-                      fontWeight:
-                      FontWeight.w600,
-                    ),
-                  ),
+                  Text('Page ${currentPage + 1} of $totalPages', style: const TextStyle(color: TraceColors.textTertiary, fontSize: 10, fontWeight: FontWeight.w600)),
                   Row(
                     children: [
-                      _PagerButton(
-                        icon:
-                        Icons
-                            .chevron_left_rounded,
-                        onTap:
-                        onPreviousPage,
-                      ),
-                      const SizedBox(
-                        width: 7,
-                      ),
-                      _PagerButton(
-                        icon:
-                        Icons
-                            .chevron_right_rounded,
-                        onTap:
-                        onNextPage,
-                      ),
+                      _PagerButton(icon: Icons.chevron_left_rounded, onTap: onPreviousPage),
+                      const SizedBox(width: 7),
+                      _PagerButton(icon: Icons.chevron_right_rounded, onTap: onNextPage),
                     ],
                   ),
                 ],
@@ -2033,311 +1244,121 @@ class _EventsSection
   }
 }
 
-// ================================================================
-// EVENT CARD
-// ================================================================
+class _EventCard extends StatelessWidget {
+  final QueryDocumentSnapshot<Map<String, dynamic>> doc;
+  final void Function(QueryDocumentSnapshot<Map<String, dynamic>>) onEdit;
+  final void Function(String id, String name) onDelete;
 
-class _EventCard
-    extends StatelessWidget {
-  final QueryDocumentSnapshot<
-      Map<String, dynamic>> doc;
-
-  final void Function(
-      QueryDocumentSnapshot<
-          Map<String, dynamic>>)
-  onEdit;
-
-  final void Function(
-      String id,
-      String name,
-      ) onDelete;
-
-  final String Function(
-      DateTime, {
-      String? existingStatus,
-      }) computeStatus;
-
-  final String Function(
-      String,
-      ) displayStatus;
-
-  final Color Function(
-      String,
-      ) statusColor;
-
-  const _EventCard({
-    required this.doc,
-    required this.onEdit,
-    required this.onDelete,
-    required this.computeStatus,
-    required this.displayStatus,
-    required this.statusColor,
-  });
+  const _EventCard({required this.doc, required this.onEdit, required this.onDelete});
 
   @override
-  Widget build(
-      BuildContext context) {
-    final data =
-    doc.data();
-
-    final event =
-    EventModel.fromFirestore(
-      doc,
-    );
-
-    final rawStatus =
-    SuperAdminCommon.text(
-      data,
-      ['status'],
-    );
-
-    final resolvedStatus =
-    computeStatus(
-      event.eventDate,
-      existingStatus:
-      rawStatus,
-    );
-
-    final status =
-    displayStatus(
-      resolvedStatus,
-    );
-
-    final color =
-    statusColor(
-      resolvedStatus,
-    );
+  Widget build(BuildContext context) {
+    final data = doc.data();
+    final name = _readText(data, const ['eventName', 'name', 'title']).trim();
+    final displayName = name.isEmpty ? 'Untitled Event' : name;
+    final date = _parseEventDate(data);
+    final venue = _readText(data, const ['venue', 'location', 'eventVenue']);
+    final statusCode = _computeEventStatus(date, existingStatus: _readText(data, const ['status']));
+    final statusText = _displayEventStatus(statusCode);
+    final color = _eventStatusColor(statusCode);
+    final imageUrl = _readText(data, const ['eventImage', 'imageUrl', 'imageURL']);
+    final timeIn = _readText(data, const ['timeInStart']);
+    final timeInEnd = _readText(data, const ['timeInEnd']);
+    final timeOut = _readText(data, const ['timeOutStart']);
+    final timeOutEnd = _readText(data, const ['timeOutEnd']);
 
     return Container(
-      padding:
-      const EdgeInsets.all(13),
-      decoration:
-      BoxDecoration(
-        color:
-        TraceColors.canvas,
-        borderRadius:
-        BorderRadius.circular(14),
-        border:
-        Border.all(
-          color:
-          TraceColors.border
-              .withValues(
-            alpha: 0.75,
-          ),
-        ),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: TraceColors.canvas,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: TraceColors.border.withValues(alpha: 0.75)),
       ),
-      child:
-      Row(
-        crossAxisAlignment:
-        CrossAxisAlignment.center,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            alignment:
-            Alignment.center,
-            decoration:
-            BoxDecoration(
-              color:
-              TraceColors.accentSoft,
-              borderRadius:
-              BorderRadius.circular(12),
-            ),
-            child:
-            Icon(
-              event.icon,
-              color:
-              TraceColors.accent,
-              size: 19,
+          ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: Container(
+              width: 54,
+              height: 54,
+              color: TraceColors.accentSoft,
+              child: imageUrl.isNotEmpty
+                  ? Image.network(
+                imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const Icon(Icons.event_rounded, color: TraceColors.accent),
+              )
+                  : const Icon(Icons.event_rounded, color: TraceColors.accent),
             ),
           ),
-          const SizedBox(
-            width: 12,
-          ),
+          const SizedBox(width: 12),
           Expanded(
-            child:
-            Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 6,
                   children: [
-                    Expanded(
-                      child:
-                      Text(
-                        event.eventName
-                            .trim()
-                            .isEmpty
-                            ? 'Untitled Event'
-                            : event.eventName,
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow.ellipsis,
-                        style:
-                        const TextStyle(
-                          color:
-                          TraceColors
-                              .textPrimary,
-                          fontSize: 13,
-                          fontWeight:
-                          FontWeight.w800,
-                        ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 230),
+                      child: Text(
+                        displayName,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: TraceColors.textPrimary, fontSize: 13, fontWeight: FontWeight.w800),
                       ),
                     ),
-                    const SizedBox(
-                      width: 8,
-                    ),
-                    _StatusBadge(
-                      label:
-                      status,
-                      color:
-                      color,
-                    ),
+                    _StatusBadge(label: statusText, color: color),
                   ],
                 ),
-                const SizedBox(
-                  height: 7,
-                ),
+                const SizedBox(height: 7),
                 Wrap(
                   spacing: 12,
                   runSpacing: 5,
                   children: [
-                    _EventMeta(
-                      icon:
-                      Icons
-                          .calendar_today_rounded,
-                      text:
-                      DateFormat(
-                        'MMM d, yyyy',
-                      ).format(
-                        event.eventDate,
-                      ),
-                    ),
-                    if (event.venue
-                        .trim()
-                        .isNotEmpty)
+                    if (date != null)
                       _EventMeta(
-                        icon:
-                        Icons
-                            .location_on_outlined,
-                        text:
-                        event.venue,
+                        icon: Icons.calendar_today_rounded,
+                        text: DateFormat('MMM d, yyyy').format(_toManila(date)),
                       ),
+                    if (venue.isNotEmpty)
+                      _EventMeta(icon: Icons.location_on_outlined, text: venue),
                   ],
                 ),
-                if (event
-                    .formattedCheckInWindow !=
-                    null ||
-                    event
-                        .formattedCheckOutWindow !=
-                        null) ...[
-                  const SizedBox(
-                    height: 7,
-                  ),
+                if ([timeIn, timeInEnd, timeOut, timeOutEnd].any((v) => v.isNotEmpty)) ...[
+                  const SizedBox(height: 7),
                   Wrap(
                     spacing: 7,
                     runSpacing: 5,
                     children: [
-                      if (event
-                          .formattedCheckInWindow !=
-                          null)
-                        _SmallChip(
-                          label:
-                          'IN',
-                          value:
-                          event
-                              .formattedCheckInWindow!,
-                        ),
-                      if (event
-                          .formattedCheckOutWindow !=
-                          null)
-                        _SmallChip(
-                          label:
-                          'OUT',
-                          value:
-                          event
-                              .formattedCheckOutWindow!,
-                        ),
+                      if (timeIn.isNotEmpty || timeInEnd.isNotEmpty)
+                        _SmallChip(label: 'MORNING', value: '${timeIn.isEmpty ? '--' : timeIn} – ${timeInEnd.isEmpty ? '--' : timeInEnd}'),
+                      if (timeOut.isNotEmpty || timeOutEnd.isNotEmpty)
+                        _SmallChip(label: 'AFTERNOON', value: '${timeOut.isEmpty ? '--' : timeOut} – ${timeOutEnd.isEmpty ? '--' : timeOutEnd}'),
                     ],
                   ),
                 ],
               ],
             ),
           ),
-          const SizedBox(
-            width: 4,
-          ),
           PopupMenuButton<String>(
-            tooltip:
-            'Event actions',
-            icon:
-            const Icon(
-              Icons.more_vert_rounded,
-              color:
-              TraceColors
-                  .textTertiary,
-              size: 20,
-            ),
-            onSelected:
-                (value) {
-              if (value ==
-                  'edit') {
-                onEdit(doc);
-              }
-
-              if (value ==
-                  'delete') {
-                onDelete(
-                  doc.id,
-                  event.eventName,
-                );
-              }
+            tooltip: 'Event actions',
+            icon: const Icon(Icons.more_vert_rounded, color: TraceColors.textTertiary, size: 20),
+            onSelected: (value) {
+              if (value == 'edit') onEdit(doc);
+              if (value == 'delete') onDelete(doc.id, displayName);
             },
-            itemBuilder:
-                (context) =>
-            const [
+            itemBuilder: (_) => const [
               PopupMenuItem(
-                value:
-                'edit',
-                child:
-                Row(
-                  children: [
-                    Icon(
-                      Icons
-                          .edit_outlined,
-                      size: 17,
-                    ),
-                    SizedBox(
-                      width: 9,
-                    ),
-                    Text(
-                      'Edit Event',
-                    ),
-                  ],
-                ),
+                value: 'edit',
+                child: Row(children: [Icon(Icons.edit_outlined, size: 17), SizedBox(width: 9), Text('Edit Event')]),
               ),
               PopupMenuItem(
-                value:
-                'delete',
-                child:
-                Row(
-                  children: [
-                    Icon(
-                      Icons
-                          .delete_outline_rounded,
-                      size: 17,
-                      color:
-                      TraceColors
-                          .danger,
-                    ),
-                    SizedBox(
-                      width: 9,
-                    ),
-                    Text(
-                      'Delete Event',
-                    ),
-                  ],
-                ),
+                value: 'delete',
+                child: Row(children: [Icon(Icons.delete_outline_rounded, size: 17, color: TraceColors.danger), SizedBox(width: 9), Text('Delete Event')]),
               ),
             ],
           ),
@@ -2347,57 +1368,25 @@ class _EventCard
   }
 }
 
-// ================================================================
-// EVENT META
-// ================================================================
-
-class _EventMeta
-    extends StatelessWidget {
+class _EventMeta extends StatelessWidget {
   final IconData icon;
   final String text;
-
-  const _EventMeta({
-    required this.icon,
-    required this.text,
-  });
+  const _EventMeta({required this.icon, required this.text});
 
   @override
-  Widget build(
-      BuildContext context) {
+  Widget build(BuildContext context) {
     return Row(
-      mainAxisSize:
-      MainAxisSize.min,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(
-          icon,
-          size: 12,
-          color:
-          TraceColors
-              .textTertiary,
-        ),
-        const SizedBox(
-          width: 4,
-        ),
+        Icon(icon, size: 12, color: TraceColors.textTertiary),
+        const SizedBox(width: 4),
         ConstrainedBox(
-          constraints:
-          const BoxConstraints(
-            maxWidth: 210,
-          ),
-          child:
-          Text(
+          constraints: const BoxConstraints(maxWidth: 210),
+          child: Text(
             text,
             maxLines: 1,
-            overflow:
-            TextOverflow.ellipsis,
-            style:
-            const TextStyle(
-              color:
-              TraceColors
-                  .textSecondary,
-              fontSize: 9.5,
-              fontWeight:
-              FontWeight.w600,
-            ),
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: TraceColors.textSecondary, fontSize: 9.5, fontWeight: FontWeight.w600),
           ),
         ),
       ],
@@ -2405,72 +1394,25 @@ class _EventMeta
   }
 }
 
-// ================================================================
-// SMALL TIME CHIP
-// ================================================================
-
-class _SmallChip
-    extends StatelessWidget {
+class _SmallChip extends StatelessWidget {
   final String label;
   final String value;
-
-  const _SmallChip({
-    required this.label,
-    required this.value,
-  });
+  const _SmallChip({required this.label, required this.value});
 
   @override
-  Widget build(
-      BuildContext context) {
+  Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 5,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: TraceColors.surface,
+        borderRadius: BorderRadius.circular(7),
+        border: Border.all(color: TraceColors.border),
       ),
-      decoration:
-      BoxDecoration(
-        color:
-        TraceColors.surface,
-        borderRadius:
-        BorderRadius.circular(7),
-        border:
-        Border.all(
-          color:
-          TraceColors.border,
-        ),
-      ),
-      child:
-      RichText(
-        text:
-        TextSpan(
+      child: RichText(
+        text: TextSpan(
           children: [
-            TextSpan(
-              text:
-              '$label  ',
-              style:
-              const TextStyle(
-                color:
-                TraceColors
-                    .accent,
-                fontSize: 8,
-                fontWeight:
-                FontWeight.w800,
-              ),
-            ),
-            TextSpan(
-              text:
-              value,
-              style:
-              const TextStyle(
-                color:
-                TraceColors
-                    .textSecondary,
-                fontSize: 8,
-                fontWeight:
-                FontWeight.w600,
-              ),
-            ),
+            TextSpan(text: '$label  ', style: const TextStyle(color: TraceColors.accent, fontSize: 8, fontWeight: FontWeight.w800)),
+            TextSpan(text: value, style: const TextStyle(color: TraceColors.textSecondary, fontSize: 8, fontWeight: FontWeight.w600)),
           ],
         ),
       ),
@@ -2478,113 +1420,49 @@ class _SmallChip
   }
 }
 
-// ================================================================
-// STATUS BADGE
-// ================================================================
-
-class _StatusBadge
-    extends StatelessWidget {
+class _StatusBadge extends StatelessWidget {
   final String label;
   final Color color;
-
-  const _StatusBadge({
-    required this.label,
-    required this.color,
-  });
+  const _StatusBadge({required this.label, required this.color});
 
   @override
-  Widget build(
-      BuildContext context) {
+  Widget build(BuildContext context) {
     return Container(
-      padding:
-      const EdgeInsets.symmetric(
-        horizontal: 8,
-        vertical: 5,
-      ),
-      decoration:
-      BoxDecoration(
-        color:
-        color.withValues(
-          alpha: 0.10,
-        ),
-        borderRadius:
-        BorderRadius.circular(7),
-      ),
-      child:
-      Text(
-        label,
-        style:
-        TextStyle(
-          color:
-          color,
-          fontSize: 8.5,
-          fontWeight:
-          FontWeight.w800,
-        ),
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.10), borderRadius: BorderRadius.circular(7)),
+      child: Text(label, style: TextStyle(color: color, fontSize: 8.5, fontWeight: FontWeight.w800)),
     );
   }
 }
 
-// ================================================================
-// PAGINATION BUTTON
-// ================================================================
-
-class _PagerButton
-    extends StatelessWidget {
+class _PagerButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback? onTap;
-
-  const _PagerButton({
-    required this.icon,
-    required this.onTap,
-  });
+  const _PagerButton({required this.icon, required this.onTap});
 
   @override
-  Widget build(
-      BuildContext context) {
-    final enabled =
-        onTap != null;
-
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
     return Material(
-      color:
-      TraceColors.canvas,
-      borderRadius:
-      BorderRadius.circular(9),
-      child:
-      InkWell(
-        onTap:
-        onTap,
-        borderRadius:
-        BorderRadius.circular(9),
-        child:
-        Container(
+      color: TraceColors.canvas,
+      borderRadius: BorderRadius.circular(9),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
           width: 32,
           height: 32,
-          alignment:
-          Alignment.center,
-          decoration:
-          BoxDecoration(
-            borderRadius:
-            BorderRadius.circular(9),
-            border:
-            Border.all(
-              color:
-              TraceColors.border,
-            ),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(color: TraceColors.border),
           ),
-          child:
-          Icon(
+          child: Icon(
             icon,
             size: 18,
             color: enabled
-                ? TraceColors
-                .textSecondary
-                : TraceColors
-                .textTertiary
-                .withValues(
-              alpha: 0.45,
-            ),
+                ? TraceColors.textSecondary
+                : TraceColors.textTertiary.withValues(alpha: 0.45),
           ),
         ),
       ),
@@ -2592,441 +1470,170 @@ class _PagerButton
   }
 }
 
-// ================================================================
-// DATE FIELD
-// ================================================================
-
-class _DateField
-    extends StatelessWidget {
-  final DateTime selectedDate;
-  final VoidCallback onTap;
-
-  const _DateField({
-    required this.selectedDate,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(
-      BuildContext context) {
-    return InkWell(
-      onTap:
-      onTap,
-      borderRadius:
-      BorderRadius.circular(12),
-      child:
-      InputDecorator(
-        decoration:
-        const InputDecoration(
-          labelText:
-          'Event Date',
-          labelStyle:
-          TextStyle(
-            color:
-            TraceColors
-                .textSecondary,
-            fontSize: 11.5,
-          ),
-          prefixIcon:
-          Icon(
-            Icons
-                .calendar_month_outlined,
-            size: 18,
-            color:
-            TraceColors
-                .textTertiary,
-          ),
-          suffixIcon:
-          Icon(
-            Icons
-                .expand_more_rounded,
-            color:
-            TraceColors
-                .textTertiary,
-          ),
-          filled:
-          true,
-          fillColor:
-          TraceColors.canvas,
-          contentPadding:
-          EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 13,
-          ),
-          border:
-          OutlineInputBorder(
-            borderRadius:
-            BorderRadius.all(
-              Radius.circular(12),
-            ),
-            borderSide:
-            BorderSide(
-              color:
-              TraceColors
-                  .border,
-            ),
-          ),
-          enabledBorder:
-          OutlineInputBorder(
-            borderRadius:
-            BorderRadius.all(
-              Radius.circular(12),
-            ),
-            borderSide:
-            BorderSide(
-              color:
-              TraceColors
-                  .border,
-            ),
-          ),
-        ),
-        child:
-        Text(
-          DateFormat(
-            'MMMM d, yyyy',
-          ).format(
-            selectedDate,
-          ),
-          style:
-          const TextStyle(
-            color:
-            TraceColors
-                .textPrimary,
-            fontSize:
-            12,
-            fontWeight:
-            FontWeight.w600,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ================================================================
-// TIME FIELD
-// ================================================================
-
-class _TimeField
-    extends StatelessWidget {
-  final String label;
-  final TimeOfDay? value;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  const _TimeField({
-    required this.label,
-    required this.value,
-    required this.icon,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(
-      BuildContext context) {
-    return InkWell(
-      onTap:
-      onTap,
-      borderRadius:
-      BorderRadius.circular(12),
-      child:
-      Container(
-        padding:
-        const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-        decoration:
-        BoxDecoration(
-          color:
-          TraceColors.canvas,
-          borderRadius:
-          BorderRadius.circular(12),
-          border:
-          Border.all(
-            color:
-            TraceColors.border,
-          ),
-        ),
-        child:
-        Row(
-          children: [
-            Icon(
-              icon,
-              size: 17,
-              color:
-              TraceColors
-                  .textTertiary,
-            ),
-            const SizedBox(
-              width: 8,
-            ),
-            Expanded(
-              child:
-              Column(
-                crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
-                children: [
-                  Text(
-                    label,
-                    maxLines: 1,
-                    overflow:
-                    TextOverflow.ellipsis,
-                    style:
-                    const TextStyle(
-                      color:
-                      TraceColors
-                          .textTertiary,
-                      fontSize: 8,
-                      fontWeight:
-                      FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(
-                    height: 2,
-                  ),
-                  Text(
-                    value == null
-                        ? 'Select time'
-                        : value!.format(
-                      context,
-                    ),
-                    maxLines: 1,
-                    overflow:
-                    TextOverflow.ellipsis,
-                    style:
-                    TextStyle(
-                      color:
-                      value == null
-                          ? TraceColors
-                          .textTertiary
-                          : TraceColors
-                          .textPrimary,
-                      fontSize: 10.5,
-                      fontWeight:
-                      FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ================================================================
-// TIME PARSER
-// ================================================================
-
-TimeOfDay? _parseTime(
-    String value,
-    ) {
-  final text =
-  value.trim();
-
-  if (text.isEmpty) {
-    return null;
-  }
-
-  final amPm =
-  RegExp(
-    r'^(\d{1,2}):(\d{2})\s*(AM|PM)$',
-    caseSensitive: false,
-  ).firstMatch(text);
-
-  if (amPm != null) {
-    int hour = int.parse(
-      amPm.group(1)!,
-    );
-
-    final minute = int.parse(
-      amPm.group(2)!,
-    );
-
-    final period =
-    amPm.group(3)!.toUpperCase();
-
-    if (period == 'PM' &&
-        hour != 12) {
-      hour += 12;
-    }
-
-    if (period == 'AM' &&
-        hour == 12) {
-      hour = 0;
-    }
-
-    if (hour >= 0 &&
-        hour <= 23 &&
-        minute >= 0 &&
-        minute <= 59) {
-      return TimeOfDay(
-        hour: hour,
-        minute: minute,
-      );
-    }
-
-    return null;
-  }
-
-  final twentyFour =
-  RegExp(
-    r'^(\d{1,2}):(\d{2})$',
-  ).firstMatch(text);
-
-  if (twentyFour != null) {
-    final hour =
-    int.parse(
-      twentyFour.group(1)!,
-    );
-
-    final minute =
-    int.parse(
-      twentyFour.group(2)!,
-    );
-
-    if (hour >= 0 &&
-        hour <= 23 &&
-        minute >= 0 &&
-        minute <= 59) {
-      return TimeOfDay(
-        hour: hour,
-        minute: minute,
-      );
-    }
-  }
-
-  return null;
-}
-
-// ================================================================
-// TIME FORMATTER
-// ================================================================
-
-String _formatTime(
-    TimeOfDay? time,
-    ) {
-  if (time == null) {
-    return '';
-  }
-
-  final hour =
-  time.hourOfPeriod == 0
-      ? 12
-      : time.hourOfPeriod;
-
-  final minute =
-  time.minute.toString().padLeft(
-    2,
-    '0',
-  );
-
-  final period =
-  time.period == DayPeriod.am
-      ? 'AM'
-      : 'PM';
-
-  return '$hour:$minute $period';
-}
-
-// ================================================================
-// ERROR STATE
-// ================================================================
-
-class _ErrorState
-    extends StatelessWidget {
+class _EventsErrorState extends StatelessWidget {
   final VoidCallback onRetry;
-
-  const _ErrorState({
-    required this.onRetry,
-  });
+  const _EventsErrorState({required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
     return Center(
-      child:
-      Padding(
-        padding:
-        const EdgeInsets.all(24),
-        child:
-        Column(
-          mainAxisSize:
-          MainAxisSize.min,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               width: 56,
               height: 56,
-              alignment:
-              Alignment.center,
-              decoration:
-              const BoxDecoration(
-                color:
-                TraceColors
-                    .dangerSoft,
-                shape:
-                BoxShape.circle,
-              ),
-              child:
-              const Icon(
-                Icons
-                    .error_outline_rounded,
-                color:
-                TraceColors
-                    .danger,
-                size: 26,
-              ),
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(color: TraceColors.dangerSoft, shape: BoxShape.circle),
+              child: const Icon(Icons.error_outline_rounded, color: TraceColors.danger, size: 26),
             ),
-            const SizedBox(
-              height: 15,
-            ),
+            const SizedBox(height: 15),
             const Text(
               'Unable to load events.',
-              style:
-              TextStyle(
-                color:
-                TraceColors
-                    .textPrimary,
-                fontSize: 14,
-                fontWeight:
-                FontWeight.w700,
-              ),
+              style: TextStyle(color: TraceColors.textPrimary, fontSize: 14, fontWeight: FontWeight.w700),
             ),
-            const SizedBox(
-              height: 5,
-            ),
+            const SizedBox(height: 5),
             const Text(
               'Check your connection and try again.',
-              textAlign:
-              TextAlign.center,
-              style:
-              TextStyle(
-                color:
-                TraceColors
-                    .textTertiary,
-                fontSize: 11,
-              ),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: TraceColors.textTertiary, fontSize: 11),
             ),
-            const SizedBox(
-              height: 17,
-            ),
+            const SizedBox(height: 17),
             ElevatedButton(
-              onPressed:
-              onRetry,
-              style:
-              SuperAdminCommon
-                  .primaryButtonStyle(),
-              child:
-              const Text(
-                'Retry',
-              ),
+              onPressed: onRetry,
+              style: SuperAdminCommon.primaryButtonStyle(),
+              child: const Text('Retry'),
             ),
           ],
         ),
       ),
     );
   }
+}
+
+// ============================================================================
+// SHARED DATA HELPERS
+// ============================================================================
+
+String _readText(Map<String, dynamic> data, List<String> keys) {
+  for (final key in keys) {
+    final value = data[key];
+    if (value == null) continue;
+    final text = value.toString().trim();
+    if (text.isNotEmpty && text.toLowerCase() != 'null') return text;
+  }
+  return '';
+}
+
+DateTime? _parseDate(dynamic value) {
+  if (value is Timestamp) return value.toDate();
+  if (value is DateTime) return value;
+  if (value is int) {
+    if (value > 1000000000) return DateTime.fromMillisecondsSinceEpoch(value);
+  }
+  if (value is String && value.trim().isNotEmpty) {
+    final text = value.trim();
+    final parsed = DateTime.tryParse(text);
+    if (parsed != null) return parsed;
+    for (final pattern in const ['M/d/yyyy', 'MM/dd/yyyy', 'd/M/yyyy', 'dd/MM/yyyy']) {
+      try {
+        return DateFormat(pattern).parseStrict(text);
+      } catch (_) {
+        // Continue trying supported date formats.
+      }
+    }
+  }
+  return null;
+}
+
+DateTime? _parseEventDate(Map<String, dynamic> data) {
+  for (final key in const ['eventDate', 'event_date', 'startDate', 'start_date', 'eventStart', 'eventStartDate', 'startTime', 'startAt', 'date']) {
+    final date = _parseDate(data[key]);
+    if (date != null) return date;
+  }
+  return null;
+}
+
+DateTime _toManila(DateTime value) =>
+    value.toUtc().add(const Duration(hours: 8));
+
+String _computeEventStatus(DateTime? eventDate, {String? existingStatus}) {
+  final stored = (existingStatus ?? '').trim().toLowerCase();
+  if (stored == 'cancelled' || stored == 'canceled') return 'cancelled';
+  if (stored == 'completed' || stored == 'complete' || stored == 'done' || stored == 'finished' || stored == 'closed') {
+    return 'ended';
+  }
+
+  if (eventDate == null) {
+    if (stored == 'active' || stored == 'ongoing' || stored == 'on-going' || stored == 'in progress') {
+      return 'active';
+    }
+    return 'upcoming';
+  }
+
+  final now = DateTime.now().toUtc().add(const Duration(hours: 8));
+  final eventDay = _toManila(eventDate);
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(eventDay.year, eventDay.month, eventDay.day);
+  if (day.isAfter(today)) return 'upcoming';
+  if (day.isAtSameMomentAs(today)) return 'active';
+  return 'ended';
+}
+
+String _displayEventStatus(String status) {
+  switch (status.toLowerCase()) {
+    case 'active':
+      return 'Ongoing';
+    case 'ended':
+      return 'Completed';
+    case 'cancelled':
+      return 'Cancelled';
+    case 'upcoming':
+    default:
+      return 'Upcoming';
+  }
+}
+
+Color _eventStatusColor(String status) {
+  switch (status.toLowerCase()) {
+    case 'active':
+      return TraceColors.warning;
+    case 'ended':
+      return TraceColors.success;
+    case 'cancelled':
+      return TraceColors.danger;
+    case 'upcoming':
+    default:
+      return const Color(0xFF2563EB);
+  }
+}
+
+TimeOfDay? _parseTime(String value) {
+  final text = value.trim();
+  if (text.isEmpty || text == '--:--') return null;
+
+  final amPm = RegExp(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$', caseSensitive: false).firstMatch(text);
+  if (amPm != null) {
+    var hour = int.parse(amPm.group(1)!);
+    final minute = int.parse(amPm.group(2)!);
+    final period = amPm.group(3)!.toUpperCase();
+    if (period == 'PM' && hour != 12) hour += 12;
+    if (period == 'AM' && hour == 12) hour = 0;
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      return TimeOfDay(hour: hour, minute: minute);
+    }
+    return null;
+  }
+
+  final twentyFour = RegExp(r'^(\d{1,2}):(\d{2})$').firstMatch(text);
+  if (twentyFour != null) {
+    final hour = int.parse(twentyFour.group(1)!);
+    final minute = int.parse(twentyFour.group(2)!);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      return TimeOfDay(hour: hour, minute: minute);
+    }
+  }
+  return null;
 }
