@@ -26,6 +26,8 @@ class _SuperAdminDashboardScreenState
     extends State<SuperAdminDashboardScreen> {
   late Future<_DashboardData> _future;
   StreamSubscription<User?>? _authSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _eventsSub;
+  bool _eventWatcherPrimed = false;
 
   @override
   void initState() {
@@ -33,11 +35,13 @@ class _SuperAdminDashboardScreenState
 
     if (FirebaseAuth.instance.currentUser != null) {
       _future = _load();
+      _watchEvents();
     } else {
       _future = Future.value(_DashboardData.empty());
       _authSub = FirebaseAuth.instance.authStateChanges().listen((user) {
         if (user != null && mounted) {
           setState(() => _future = _load());
+          _watchEvents();
           _authSub?.cancel();
         }
       });
@@ -47,7 +51,35 @@ class _SuperAdminDashboardScreenState
   @override
   void dispose() {
     _authSub?.cancel();
+    _eventsSub?.cancel();
     super.dispose();
+  }
+
+  // Refresh dashboard totals and dropdown options whenever the events
+  // collection changes, including when an event is deleted.
+  void _watchEvents() {
+    _eventsSub?.cancel();
+    _eventWatcherPrimed = false;
+
+    _eventsSub = FirebaseFirestore.instance
+        .collection('events')
+        .snapshots()
+        .listen(
+      (_) {
+        if (!mounted) return;
+
+        // Ignore the initial snapshot; _load() already runs on startup.
+        if (!_eventWatcherPrimed) {
+          _eventWatcherPrimed = true;
+          return;
+        }
+
+        setState(() => _future = _load());
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('Dashboard event watcher error: $error');
+      },
+    );
   }
 
   Future<_DashboardData> _load() async {
@@ -150,11 +182,17 @@ class _SuperAdminDashboardScreenState
       // ------------------------------------------------------------
       // EVENTS
       // ------------------------------------------------------------
-      final events = eventsSnapshot.docs.toList()
+      // Only actual, non-deleted event documents are displayed.
+      // Attendance rows alone must never create event dropdown options.
+      final events = eventsSnapshot.docs
+          .where((doc) => !_isDeletedEvent(doc.data()))
+          .toList()
         ..sort((a, b) {
           final aDate = _parseEventStartDate(a.data());
           final bDate = _parseEventStartDate(b.data());
-          if (aDate == null && bDate == null) return 0;
+          if (aDate == null && bDate == null) {
+            return a.id.compareTo(b.id);
+          }
           if (aDate == null) return 1;
           if (bDate == null) return -1;
           return bDate.compareTo(aDate);
@@ -254,13 +292,11 @@ class _SuperAdminDashboardScreenState
       // ------------------------------------------------------------
       final List<_AttendanceRecord> attendanceRecords = [];
       final List<_EventAttendance> eventAttendance = [];
-      final Set<String> handledEventIds = {};
       final Set<int> attendanceYears = {nowManila.year};
 
       for (final eventDoc in events) {
         final eventData = eventDoc.data();
         final eventId = eventDoc.id;
-        handledEventIds.add(eventId);
 
         final matched = rawByEvent[eventId] ?? <String, _RawAttendance>{};
         DateTime? eventDate = _parseEventStartDate(eventData);
@@ -365,56 +401,13 @@ class _SuperAdminDashboardScreenState
         );
       }
 
-      // Keep records for event IDs that still exist in attendance but whose
-      // event document is missing/deleted. There is no safe way to infer
-      // absent students for an event without its event document.
-      for (final entry in rawByEvent.entries) {
-        if (handledEventIds.contains(entry.key)) continue;
-        int present = 0;
-        int halfDay = 0;
-        int absent = 0;
-        DateTime? fallbackDate;
-
-        for (final raw in entry.value.values) {
-          fallbackDate ??= raw.date;
-          final year = raw.date == null ? null : _toManila(raw.date!).year;
-          if (year != null) attendanceYears.add(year);
-          attendanceRecords.add(
-            _AttendanceRecord(
-              attendanceId: raw.attendanceId,
-              eventId: entry.key,
-              studentKey: raw.studentKey,
-              status: raw.status,
-              date: raw.date,
-              year: year,
-            ),
-          );
-          switch (raw.status) {
-            case AttendanceStatus.present:
-              present++;
-              break;
-            case AttendanceStatus.halfDay:
-              halfDay++;
-              break;
-            case AttendanceStatus.absent:
-              absent++;
-              break;
-          }
-        }
-
-        eventAttendance.add(
-          _EventAttendance(
-            eventId: entry.key,
-            eventName: 'Event record (${entry.key})',
-            eventDate: fallbackDate,
-            eventEndDate: null,
-            storedStatus: '',
-            present: present,
-            halfDay: halfDay,
-            absent: absent,
-          ),
-        );
-      }
+      // Do not create dashboard breakdown rows for orphan attendance.
+      // These records commonly belong to hard-deleted events. If the event
+      // document no longer exists in "events", it must not appear in the
+      // dropdown or affect event-based attendance totals.
+      //
+      // totalAttendance above still shows the raw number of attendance
+      // documents stored in Firestore for auditing purposes.
 
       // Records without an event ID cannot be included in any event filter,
       // but can still contribute to the all-events breakdown.
@@ -446,7 +439,7 @@ class _SuperAdminDashboardScreenState
       return _DashboardData(
         totalUsers: usersSnapshot.docs.length,
         totalStudents: students.length,
-        totalEvents: eventsSnapshot.docs.length,
+        totalEvents: events.length,
         // This KPI reports actual Firestore attendance documents. The chart
         // below uses unique student-per-event rows to avoid double counting.
         totalAttendance: attendanceSnapshot.docs.length,
@@ -466,6 +459,45 @@ class _SuperAdminDashboardScreenState
       debugPrintStack(stackTrace: stackTrace);
       rethrow;
     }
+  }
+
+  bool _isDeletedEvent(Map<String, dynamic> data) {
+    const deletedFlags = <String>[
+      'isDeleted',
+      'is_deleted',
+      'deleted',
+      'isRemoved',
+      'is_removed',
+    ];
+
+    for (final key in deletedFlags) {
+      final value = data[key];
+
+      if (value == true) return true;
+      if (value is num && value == 1) return true;
+
+      if (value is String) {
+        final normalized = value.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+      }
+    }
+
+    final status = (data['status'] ??
+            data['eventStatus'] ??
+            data['event_status'] ??
+            '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    return const <String>{
+      'deleted',
+      'removed',
+      'soft deleted',
+      'soft-deleted',
+      'trashed',
+      'trash',
+    }.contains(status);
   }
 
   void _retry() {
